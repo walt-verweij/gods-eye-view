@@ -170,6 +170,14 @@ export function coalesceProxyRequest(inFlight, key, create) {
   return { promise, shared: false };
 }
 
+/** Read a finite number from URLSearchParams, treating absent and blank as invalid. */
+export function requiredFiniteQueryNumber(params, key) {
+  const value = params.get(key);
+  if (value === null || value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 // ---------------------------------------------------------------------------
 
 function isNonGlobalIpv4(address) {
