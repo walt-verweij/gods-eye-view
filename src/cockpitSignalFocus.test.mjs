@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { formatAwarenessLabel } from './data/militaryAwarenessEngine.js';
 
-const source = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./cockpitViewController.js', import.meta.url), 'utf8');
 const renderStart = source.indexOf('  renderCockpitSignals() {');
 const renderEnd = source.indexOf('  setContextCollapsed(', renderStart);
 assert.ok(renderStart >= 0 && renderEnd > renderStart);
