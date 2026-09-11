@@ -800,8 +800,8 @@ test('generic voice visibility preserves a manager resource-cancellation envelop
     layers: new Map([['rocket-launches', { module: {} }]]),
     getAll: () => [{ id: 'rocket-launches', name: 'Space Missions' }],
     getLayerLifecycleState: () => ({ enabled: false, lifecycleState: 'disabled', uncertain: false }),
-    _setEnabledWithIntent: () => ({ intentEpoch: 7, promise: Promise.resolve(false) }),
-    _waitForVisibilityIntent: async () => ({
+    supersedeLayerVisibility: () => ({ intentEpoch: 7, promise: Promise.resolve(false) }),
+    waitForLayerVisibilityIntent: async () => ({
       intentEpoch: 7,
       enabled: true,
       origin: 'voice',
@@ -847,8 +847,8 @@ test('generic voice visibility preserves caller-abort phase before the stale-tur
     layers: new Map([['rocket-launches', { module: {} }]]),
     getAll: () => [{ id: 'rocket-launches', name: 'Space Missions' }],
     getLayerLifecycleState: () => ({ enabled: false, lifecycleState: 'disabled', uncertain: false }),
-    _setEnabledWithIntent: () => ({ intentEpoch: 11, promise: Promise.resolve(false) }),
-    _waitForVisibilityIntent: async () => ({
+    supersedeLayerVisibility: () => ({ intentEpoch: 11, promise: Promise.resolve(false) }),
+    waitForLayerVisibilityIntent: async () => ({
       intentEpoch: 11,
       enabled: true,
       origin: 'voice',
@@ -891,8 +891,8 @@ test('generic voice visibility preserves an exact commit when a newer turn arriv
     layers: new Map([['rocket-launches', { module: {} }]]),
     getAll: () => [{ id: 'rocket-launches', name: 'Space Missions' }],
     getLayerLifecycleState: () => ({ enabled: true, lifecycleState: 'enabled', uncertain: false }),
-    _setEnabledWithIntent: () => ({ intentEpoch: 13, promise: Promise.resolve(true) }),
-    _waitForVisibilityIntent: async () => ({
+    supersedeLayerVisibility: () => ({ intentEpoch: 13, promise: Promise.resolve(true) }),
+    waitForLayerVisibilityIntent: async () => ({
       intentEpoch: 13,
       enabled: true,
       origin: 'voice',

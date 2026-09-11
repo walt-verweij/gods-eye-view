@@ -342,11 +342,11 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
       let changeError = null;
       let intentOutcome = null;
       try {
-        if (typeof dataManager._setEnabledWithIntent === 'function') {
-          const intent = dataManager._setEnabledWithIntent(layerId, enabled, changeOptions);
+        if (typeof dataManager.supersedeLayerVisibility === 'function') {
+          const intent = dataManager.supersedeLayerVisibility(layerId, enabled, changeOptions);
           changed = await intent.promise;
           if (Number.isInteger(intent.intentEpoch)) {
-            intentOutcome = await dataManager._waitForVisibilityIntent?.(layerId, intent.intentEpoch);
+            intentOutcome = await dataManager.waitForLayerVisibilityIntent?.(layerId, intent.intentEpoch);
           }
         } else {
           changed = await dataManager.setEnabled(layerId, enabled, changeOptions);
@@ -1360,11 +1360,11 @@ export async function controlRadio(viewer, dataManager, args = {}, options = {})
     if (options.signal) enableOptions.signal = options.signal;
     let result = false;
     try {
-      if (typeof dataManager._setEnabledWithIntent === 'function') {
-        const intent = dataManager._setEnabledWithIntent('radio', shouldEnable, enableOptions);
+      if (typeof dataManager.supersedeLayerVisibility === 'function') {
+        const intent = dataManager.supersedeLayerVisibility('radio', shouldEnable, enableOptions);
         result = await intent.promise;
         if (Number.isInteger(intent.intentEpoch)) {
-          lastIntentOutcome = await dataManager._waitForVisibilityIntent?.('radio', intent.intentEpoch);
+          lastIntentOutcome = await dataManager.waitForLayerVisibilityIntent?.('radio', intent.intentEpoch);
         }
       } else {
         result = await dataManager.setEnabled('radio', shouldEnable, enableOptions);
