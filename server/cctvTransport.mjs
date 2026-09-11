@@ -3,56 +3,14 @@ import https from 'node:https';
 import { lookup as lookupDns } from 'node:dns/promises';
 import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
+import { isPublicAddress } from './shared.mjs';
 
 export const CCTV_FRAME_MAX_BYTES = 8 * 1024 * 1024;
 export const CCTV_MAX_REDIRECTS = 3;
 
-function isNonGlobalIpv4(address) {
-  const parts = address.split('.');
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
-  const values = parts.map(Number);
-  if (values.some((value) => value > 255)) return true;
-  const [a, b, c] = values;
-  return a === 0 || a === 10 || a === 127 || a >= 224
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 0)
-    || (a === 192 && b === 88 && c === 99)
-    || (a === 192 && b === 168)
-    || (a === 198 && (b === 18 || b === 19))
-    || (a === 198 && b === 51 && c === 100)
-    || (a === 203 && b === 0 && c === 113);
-}
-
-function ipv6Number(address) {
-  const pieces = address.toLowerCase().split('::');
-  if (pieces.length > 2) return null;
-  const left = pieces[0] ? pieces[0].split(':') : [];
-  const right = pieces[1] ? pieces[1].split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if ((pieces.length === 1 && missing !== 0) || (pieces.length === 2 && missing < 1)) return null;
-  const groups = [...left, ...Array(Math.max(0, missing)).fill('0'), ...right];
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
-  return groups.reduce((total, group) => (total << 16n) | BigInt(`0x${group}`), 0n);
-}
-
 /** Return whether an address may be reached by catalog-derived CCTV sources. */
 export function isPublicCctvAddress(value) {
-  const address = String(value ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (isIP(address) === 4) return !isNonGlobalIpv4(address);
-  if (isIP(address) !== 6) return false;
-  const numeric = ipv6Number(address);
-  if (numeric === null) return false;
-  const inCidr = (base, prefix) => {
-    const shift = 128n - BigInt(prefix);
-    return (numeric >> shift) === (ipv6Number(base) >> shift);
-  };
-  return inCidr('2000:0:0:0:0:0:0:0', 3)
-    && !inCidr('2001:0:0:0:0:0:0:0', 23)
-    && !inCidr('2001:db8:0:0:0:0:0:0', 32)
-    && !inCidr('2002:0:0:0:0:0:0:0', 16)
-    && !inCidr('3fff:0:0:0:0:0:0:0', 20);
+  return isPublicAddress(value);
 }
 
 function validCctvAddress(value) {

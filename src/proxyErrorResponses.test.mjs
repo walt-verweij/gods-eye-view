@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const source = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
+const source = [
+  readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/shared.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/celestrak.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/rocketLaunches.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/terrainHeights.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/adsbdb.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/overpass.mjs', import.meta.url), 'utf8'),
+].join('\n');
 const detail = 'fixture-secret-token /internal/example <html>';
 
 // Execute the production middleware with isolated upstreams and cache storage.
