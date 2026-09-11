@@ -14,7 +14,7 @@ import militaryFlightsLayer, {
 const SUBJECT = 'abc123';
 const NEXT_SUBJECT = 'def456';
 
-const UI_SOURCE = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+const COCKPIT_CONTROLLER_SOURCE = readFileSync(new URL('../cockpitViewController.js', import.meta.url), 'utf8');
 const FLIGHTS_SOURCE = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
 const MILITARY_SOURCE = readFileSync(new URL('./militaryFlights.js', import.meta.url), 'utf8');
 
@@ -85,15 +85,15 @@ function candidateIds(layer) {
 
 test('Cockpit lifecycle publishes one normalized aircraft identity to both detection owners', () => {
   const dispatcher = /dispatchCockpitModeChanged\(active, info = null\) \{[\s\S]*?\n  \}/
-    .exec(UI_SOURCE)?.[0];
+    .exec(COCKPIT_CONTROLLER_SOURCE)?.[0];
   assert.ok(dispatcher, 'Cockpit event dispatcher is defined');
   assert.match(dispatcher, /info\?\.icao24/);
   assert.match(dispatcher, /\.trim\(\)\.toLowerCase\(\)/);
   assert.match(dispatcher, /\['flights', 'military'\]\.includes\(info\?\.layerId\)/);
   assert.match(dispatcher, /detail: \{ active: active === true, subjectId, layerId \}/);
-  assert.match(UI_SOURCE, /this\.dispatchCockpitModeChanged\(true, info\);/,
+  assert.match(COCKPIT_CONTROLLER_SOURCE, /this\.dispatchCockpitModeChanged\(true, info\);/,
     'entry and in-Cockpit handoff publish the active subject');
-  assert.match(UI_SOURCE, /this\.dispatchCockpitModeChanged\(false\);/,
+  assert.match(COCKPIT_CONTROLLER_SOURCE, /this\.dispatchCockpitModeChanged\(false\);/,
     'exit clears the active subject');
 
   for (const [name, source] of [
@@ -189,4 +189,3 @@ test('a Cockpit subject duplicated across commercial and military feeds is suppr
     else globalThis.document = realDocument;
   }
 });
-
