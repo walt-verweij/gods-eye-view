@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import { ShareLinkManager, decodeShareCreatedAtMs } from './sharelink.js';
 import { createDefaultLayerState } from './data/layerState.js';
 
-const uiSource = fs.readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+const uiSource = [
+  fs.readFileSync(new URL('./ui.js', import.meta.url), 'utf8'),
+  fs.readFileSync(new URL('./ui/keyboardFocusController.js', import.meta.url), 'utf8'),
+  fs.readFileSync(new URL('./ui/mapStackStyleController.js', import.meta.url), 'utf8'),
+].join('\n');
+const mapStackStyleSource = fs.readFileSync(new URL('./ui/mapStackStyleController.js', import.meta.url), 'utf8');
 
 function sourceBlock(start, end) {
   const startIndex = uiSource.indexOf(start);
@@ -416,9 +421,9 @@ test('newer visual, map, and individual panel actions suppress only their owned 
 
 test('every explicit visual UI gesture claims restore authority before it mutates state', () => {
   const initUi = sourceBlock('  _initUI() {', '  _initMapStackControl() {');
+  const keyboardAttach = sourceBlock('  attach() {', '  attachPoiNavigation() {');
+  const keyboardWiring = sourceBlock('    this.keyboardFocusController = new KeyboardFocusController({', '    this._cockpitVisionMode');
   const gestureRoutes = [
-    ["if (e.key.toLowerCase() === 'h')", "if (e.key.toLowerCase() === 'o')", 'this.hud.toggle()', 'HUD hotkey'],
-    ["if (e.key.toLowerCase() === 'd')", "if (e.key.toLowerCase() === 'c')", 'cycleDetectionMode()', 'detection hotkey'],
     ['// Bloom toggle', '// Bloom intensity slider', 'this._setBloomEnabled(', 'bloom button'],
     ['// Bloom intensity slider', '// Sharpen toggle', 'this._setBloomIntensity(', 'bloom slider'],
     ['// Sharpen toggle', '// Scope mask', 'this._setSharpenEnabled(', 'sharpen button'],
@@ -435,6 +440,21 @@ test('every explicit visual UI gesture claims restore authority before it mutate
     const endIndex = initUi.indexOf(end, startIndex + start.length);
     assert.ok(startIndex >= 0 && endIndex > startIndex, `${label} route is missing`);
     assertClaimsBefore(initUi.slice(startIndex, endIndex), mutation, label);
+  }
+
+  for (const [start, end, callback, nextCallback, mutation, label] of [
+    ["if (event.key.toLowerCase() === 'h')", "if (event.key.toLowerCase() === 'o')", 'this.onToggleHud()', 'onToggleOrbit:', 'this.hud.toggle()', 'HUD hotkey'],
+    ["if (event.key.toLowerCase() === 'd')", "if (event.key.toLowerCase() === 'c')", 'this.onCycleDetection()', 'onToggleCctv:', 'cycleDetectionMode()', 'detection hotkey'],
+  ]) {
+    const startIndex = keyboardAttach.indexOf(start);
+    const endIndex = keyboardAttach.indexOf(end, startIndex + start.length);
+    assert.ok(startIndex >= 0 && endIndex > startIndex, `${label} route is missing`);
+    assert.match(keyboardAttach.slice(startIndex, endIndex), new RegExp(callback.replace(/[().]/g, '\\$&')));
+    const callbackName = callback.slice('this.'.length, -2);
+    const callbackStart = keyboardWiring.indexOf(`${callbackName}:`);
+    const callbackEnd = keyboardWiring.indexOf(nextCallback, callbackStart);
+    assert.ok(callbackStart >= 0 && callbackEnd > callbackStart, `${label} callback wiring is missing`);
+    assertClaimsBefore(keyboardWiring.slice(callbackStart, callbackEnd), mutation, label);
   }
 
   const hudToggle = sourceBlock('  _initHUDToggle() {', '  _initCockpitDisplayPortal() {');
@@ -556,8 +576,10 @@ test('every explicit visual control facade claims restore authority before mutat
     assertClaimsBefore(sourceBlock(start, end), mutation, label);
   }
 
-  const style = sourceBlock('  setStyle(styleName, {', '  _startTransition(styleName, fromValue, toValue) {');
-  assertClaimsBefore(style, 'this.activeStyle = styleName', 'setStyle');
+  const styleStart = mapStackStyleSource.indexOf('  setStyle(styleName, {');
+  const styleEnd = mapStackStyleSource.indexOf('\n  dispose()', styleStart);
+  const style = mapStackStyleSource.slice(styleStart, styleEnd);
+  assertClaimsBefore(style, 'this.setActiveStyle(styleName)', 'setStyle');
   const sliders = sourceBlock('  _updateSliderPanel(styleName, { reveal = false } = {}) {', '  _revealStyleParameters() {');
   assertClaimsBefore(sliders, 'this.stages[styleName].uniforms[uName] = val', 'style parameter slider');
 });

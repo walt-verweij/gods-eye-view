@@ -329,7 +329,10 @@ test('the keyboard focus ring survives on the ACTIVE chip', () => {
 
 test('the Visual Presets tray owns Map Source and the retired left panel is absent', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  const ui = [
+    readFileSync(new URL('./ui.js', import.meta.url), 'utf8'),
+    readFileSync(new URL('./ui/mapStackStyleController.js', import.meta.url), 'utf8'),
+  ].join('\n');
 
   assert.doesNotMatch(html, /map-stack-select/, 'the SOURCE dropdown is replaced by the chip row');
   assert.match(
@@ -348,22 +351,22 @@ test('the Visual Presets tray owns Map Source and the retired left panel is abse
 
   assert.match(
     ui,
-    /renderMapStackChips\(this\._mapStackChips, this\.mapStackController\.getStacks\(\), \{[\s\S]*?onSelect: \(stackId\) => \{ this\._setMapStack\(stackId\); \}/,
+    /renderMapStackChips\(this\.mapStackChips, this\.mapStackController\.getStacks\(\), \{[\s\S]*?onSelect: \(stackId\) => \{ this\.setMapStackInternal\(stackId\); \}/,
     'chips must dispatch through the same _setMapStack path the dropdown used',
   );
   assert.match(
     ui,
-    /_renderMapStackState\(state\) \{[\s\S]*?syncMapStackChips\(this\._mapStackChips, state\.activeId\)/,
+    /renderMapStackState\(state\) \{[\s\S]*?syncMapStackChips\(this\.mapStackChips, state\.activeId\)/,
     'the active chip must be re-synced from controller state',
   );
   assert.match(
     ui,
-    /window\.addEventListener\('gev:map-stack-changed', this\._mapStackChangeHandler\)/,
+    /window\.addEventListener\('gev:map-stack-changed', this\.mapStackChangeHandler\)/,
     'provider-driven fallback must re-sync the UI without a user click',
   );
   assert.match(
     ui,
-    /window\.removeEventListener\('gev:map-stack-changed', this\._mapStackChangeHandler\)/,
+    /window\.removeEventListener\('gev:map-stack-changed', this\.mapStackChangeHandler\)/,
     'the provider-driven state listener must be released with StyleManager',
   );
 });
