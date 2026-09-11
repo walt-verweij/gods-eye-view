@@ -158,7 +158,7 @@ async function main() {
     await page.waitForFunction(() => (
       window.__godsEyeView?.viewer
       && window.__godsEyeView?.dataManager?.layers?.has('flights')
-    ), { timeout: 150_000 }).catch(async (error) => {
+    ), { timeout: 150_000, polling: 100 }).catch(async (error) => {
       const loader = await page.evaluate(() => document.querySelector('.loader-status')?.textContent || 'no loader status');
       throw new Error(`Globe did not initialise (${loader}); ${consoleErrors.join(' | ') || error.message}`);
     });
@@ -203,13 +203,13 @@ async function main() {
     });
     assert(cockpit.context?.ok, `Contacts activation failed: ${cockpit.context?.error || 'unknown error'}`);
     assert(cockpit.entry?.ok, `Cockpit entry failed: ${cockpit.entry?.error || 'unknown error'}`);
-    await page.waitForFunction(() => document.body.classList.contains('cockpit-mode'), { timeout: 30_000 });
+    await page.waitForFunction(() => document.body.classList.contains('cockpit-mode'), { timeout: 30_000, polling: 100 });
     pass('cockpit entered', stepStartedAt);
 
     stepStartedAt = performance.now();
     const exited = await page.evaluate(() => window.__godsEyeView.styleManager.controlCockpit('exit'));
     assert(exited.ok, `Cockpit exit failed: ${exited.error || 'unknown error'}`);
-    await page.waitForFunction(() => !document.body.classList.contains('cockpit-mode'), { timeout: 30_000 });
+    await page.waitForFunction(() => !document.body.classList.contains('cockpit-mode'), { timeout: 30_000, polling: 100 });
     pass('cockpit exited', stepStartedAt);
 
     stepStartedAt = performance.now();
