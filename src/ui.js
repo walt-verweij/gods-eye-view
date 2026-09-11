@@ -10357,7 +10357,13 @@ export class StyleManager {
     this._removeNavigationAuthorityListener = null;
     this._contextModeChanging = true;
     this._contextMode = null;
-    await this._restoreContextSession();
+    let restoreError = null;
+    try {
+      await this._restoreContextSession();
+    } catch (error) {
+      // Teardown still owns every later resource even when restoration fails.
+      restoreError = error;
+    }
     // IR boost teardown BEFORE detaching the data manager: restore fog and
     // un-boost both aircraft layers so a surviving viewer or replacement
     // manager doesn't inherit sensor state (review P2, 2026-08-16).
@@ -10494,5 +10500,6 @@ export class StyleManager {
     destroyWorldOverlay();
     // Clear transitions
     this.transitions.clear();
+    if (restoreError) throw restoreError;
   }
 }
