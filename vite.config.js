@@ -81,6 +81,25 @@ import { fetchCctvFrame, fetchCctvResponse } from './server/cctvTransport.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
+ * Makes a proxy's dev/preview availability an explicit plugin contract.
+ * Data feeds are available in both servers by default; credential setup opts
+ * out below because preview must never expose configuration writes.
+ *
+ * @param {import('vite').Plugin} plugin
+ * @param {{preview?: boolean}} [options]
+ * @returns {import('vite').Plugin}
+ */
+function registerProxy(plugin, { preview = true } = {}) {
+  const handler = plugin.configureServer;
+  if (typeof handler !== 'function') throw new TypeError(`${plugin.name} requires configureServer`);
+  return {
+    ...plugin,
+    configureServer: handler,
+    ...(preview ? { configurePreviewServer: handler } : {}),
+  };
+}
+
+/**
  * Which launcher started this process, captured at MODULE LOAD — before the
  * config factory's loadEnv() copies dotenv files into process.env. Provider
  * Settings uses this to decide which credential store it owns, so it must
@@ -1310,11 +1329,10 @@ function radioBrowserProxy() {
   const install = (server) => {
     server.middlewares.use('/api/radio', middleware);
   };
-  return {
+  return registerProxy({
     name: 'radio-browser-proxy',
     configureServer: install,
-    configurePreviewServer: install,
-  };
+  });
 }
 // ---------------------------------------------------------------------------
 // GBFS (General Bikeshare Feed Specification) proxy constants
@@ -1594,7 +1612,7 @@ function celestrakProxy() {
     return { at: Date.now(), body };
   }
 
-  return {
+  return registerProxy({
     name: 'celestrak-proxy',
     configureServer(server) {
       server.middlewares.use('/api/celestrak', async (req, res) => {
@@ -1651,7 +1669,7 @@ function celestrakProxy() {
         }
       });
     },
-  };
+  });
 }
 
 export const LL2_CACHE_TTL_MS = 15 * 60_000;
@@ -1768,15 +1786,12 @@ function rocketLaunchesProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'rocket-launches-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 /**
@@ -1900,7 +1915,7 @@ function tomtomProxy() {
     return buf;
   }
 
-  return {
+  return registerProxy({
     name: 'tomtom-proxy',
     configureServer(server) {
       server.middlewares.use('/api/tomtom', async (req, res) => {
@@ -2006,7 +2021,7 @@ function tomtomProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -2157,7 +2172,7 @@ function firmsProxy() {
     return statusInflight;
   }
 
-  return {
+  return registerProxy({
     name: 'firms-proxy',
     configureServer(server) {
       server.middlewares.use('/api/firms', async (req, res) => {
@@ -2229,7 +2244,7 @@ function firmsProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -2338,7 +2353,7 @@ function terrainHeightsProxy() {
     return inflight.get(key);
   }
 
-  return {
+  return registerProxy({
     name: 'terrain-heights-proxy',
     configureServer(server) {
       server.middlewares.use('/api/terrain/heights', async (req, res) => {
@@ -2381,7 +2396,7 @@ function terrainHeightsProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -2473,7 +2488,7 @@ function adsbdbProxy() {
     return inflight.get(ik);
   }
 
-  return {
+  return registerProxy({
     name: 'adsbdb-proxy',
     configureServer(server) {
       server.middlewares.use('/api/adsbdb', async (req, res) => {
@@ -2503,7 +2518,7 @@ function adsbdbProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -2678,7 +2693,7 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
  * @returns {import('vite').Plugin}
  */
 function overpassProxy() {
-  return {
+  return registerProxy({
     name: 'overpass-proxy',
     configureServer(server) {
       server.middlewares.use('/api/overpass', async (req, res) => {
@@ -2901,7 +2916,7 @@ function overpassProxy() {
         }
       });
     },
-  };
+  });
 }
 
 export function adsbLolFallbackAnchor(req) {
@@ -3016,7 +3031,7 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  * @returns {import('vite').Plugin}
  */
 function openSkyProxy() {
-  return {
+  return registerProxy({
     name: 'opensky-proxy',
     configureServer(server) {
       server.middlewares.use('/api/opensky', async (req, res) => {
@@ -3296,7 +3311,7 @@ function openSkyProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -3351,7 +3366,7 @@ function gbfsCacheControl(pathname) {
  * @returns {import('vite').Plugin}
  */
 function gbfsProxy() {
-  return {
+  return registerProxy({
     name: 'gbfs-proxy',
     configureServer(server) {
       server.middlewares.use('/api/gbfs', async (req, res) => {
@@ -3456,7 +3471,7 @@ function gbfsProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -4634,7 +4649,7 @@ function cctvProxy() {
     }
   };
 
-  return {
+  return registerProxy({
     name: 'cctv-proxy',
     configureServer(server) {
       server.middlewares.use('/api/cctv', async (req, res) => {
@@ -4852,7 +4867,7 @@ function cctvProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -4870,7 +4885,7 @@ function adsbLolProxy() {
   let _cacheAt = 0;
   /** Response cache TTL (ms). */
   const CACHE_MS = 12000;
-  return {
+  return registerProxy({
     name: 'adsblol-proxy',
     configureServer(server) {
       server.middlewares.use('/api/adsblol/mil', async (req, res) => {
@@ -4903,7 +4918,7 @@ function adsbLolProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -4974,7 +4989,7 @@ function aisLiveProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'ais-live-proxy',
     configureServer(server) {
       install(server.middlewares);
@@ -4984,16 +4999,11 @@ function aisLiveProxy() {
       // interval and another socket.
       server.httpServer?.on('close', disposeAisStream);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-      startAisStreamWatchdogTick();
-      server.httpServer?.on('close', disposeAisStream);
-    },
     // Middleware-mode backstop: there is no httpServer to hang 'close' on.
     closeBundle() {
       disposeAisStream();
     },
-  };
+  });
 }
 
 /**
@@ -5098,15 +5108,12 @@ function trackBackfillProxies() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'track-backfill-proxies',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 /**
@@ -5375,15 +5382,12 @@ export function openAiRealtimeProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'openai-realtime-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function extractOpenAiResponseText(data) {
@@ -5685,15 +5689,12 @@ export function googlePlacesContextProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'google-places-context-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function placeContextPriority(types) {
@@ -7078,15 +7079,12 @@ function militaryInstallationsProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'military-installations-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -7373,15 +7371,12 @@ function regionalBriefProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'regional-brief-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function weatherEffectsProxy() {
@@ -7455,15 +7450,12 @@ function weatherEffectsProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'weather-effects-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function parseJsonEnv(key, fallback) {
@@ -7686,7 +7678,7 @@ function keySetupEndpoint() {
       throw error;
     }
   };
-  return {
+  return registerProxy({
     name: 'gev-key-setup',
     // serve AND not preview: `vite preview` resolves with command 'serve' too,
     // so a bare apply:'serve' would still configure under preview. The endpoints
@@ -7773,7 +7765,7 @@ function keySetupEndpoint() {
         });
       });
     },
-  };
+  }, { preview: false });
 }
 
 /**

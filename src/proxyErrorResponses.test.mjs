@@ -32,7 +32,7 @@ function fixture(name, overrides = {}, preview = false) {
     resolveTerrainHeightRequest: async () => { throw new Error(detail); },
     ...overrides,
   };
-  const helpers = ['readResponseTextCapped', 'coalesceProxyRequest', 'launchLibraryRequestHeaders'].map(extract).join('\n');
+  const helpers = ['registerProxy', 'readResponseTextCapped', 'coalesceProxyRequest', 'launchLibraryRequestHeaders'].map(extract).join('\n');
   const plugin = new Function(...Object.keys(deps), `${helpers}\n${extract(name)}\nreturn ${name}();`)(...Object.values(deps));
   let middleware;
   plugin[preview ? 'configurePreviewServer' : 'configureServer']({ middlewares: { use(_route, handler) { middleware = handler; } } });
