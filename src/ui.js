@@ -1,5 +1,8 @@
 import * as Cesium from 'cesium';
 import { CockpitViewController } from './cockpitViewController.js';
+import { PanelLayoutController } from './ui/panelLayoutController.js';
+import { KeyboardFocusController } from './ui/keyboardFocusController.js';
+import { MapStackStyleController } from './ui/mapStackStyleController.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -26,7 +29,6 @@ import {
   isExplicitLayerStateOrigin,
   LayerStateCoordinator,
 } from './data/layerState.js';
-import { renderMapStackChips, syncMapStackChips } from './mapStackChips.js';
 import { OrbitController } from './orbit.js';
 import {
   CelestialRing,
@@ -679,7 +681,13 @@ export class StyleManager {
     this._recordingMode = false;
     this._recordingConfig = { hidePanels: true, hudMode: 'minimal', safeFrame: '16:9' };
     this._preRecordingHudState = null;
-    this._panelZCounter = PANEL_Z_BASE + 10;
+    this.panelLayoutController = new PanelLayoutController({
+      getStorageKey: (panelId) => this._panelStorageKey(panelId),
+      onLayoutRightPanels: () => this._layoutRightPanels(),
+      onSyncCctvPanelViewport: () => this._syncCctvPanelViewport(),
+      panelZBase: PANEL_Z_BASE,
+      panelZMax: PANEL_Z_MAX,
+    });
     this._animFrameId = null;
     this._lastLoadingFeedbackUpdateAt = 0;
     this._loadingFeedbackState = createLoadingFeedbackState();
@@ -798,7 +806,6 @@ export class StyleManager {
     this._scopeFeatherValue = document.getElementById('scope-feather-value');
     this._mapStackChips = document.getElementById('map-stack-chips');
     this._mapStackStatus = document.getElementById('map-stack-status');
-    this._mapStackChangeHandler = null;
     this._cleanViewBtn = document.getElementById('clean-view-toggle');
     this._cleanViewExitBtn = document.getElementById('clean-view-exit');
     this._dataPanel = document.getElementById('data-panel');
@@ -939,6 +946,29 @@ export class StyleManager {
 
     // Intel HUD
     this.hud = new IntelHUD(viewer);
+    this.keyboardFocusController = new KeyboardFocusController({
+      getLocationSearch: () => this._locationSearch,
+      onSetStyle: (style) => this.setStyle(style),
+      onToggleHud: () => {
+        this.shareLinkManager?.claimRestoreLane?.('visual');
+        this.hud.toggle();
+        this._updateHudButtonState();
+        this._syncShareState();
+      },
+      onToggleOrbit: () => this._toggleOrbit(),
+      onToggleCleanView: () => this.toggleCleanView(),
+      onToggleDataPanel: () => document.getElementById('data-panel').classList.toggle('active'),
+      onCycleDetection: () => {
+        this.shareLinkManager?.claimRestoreLane?.('visual');
+        this._detectionUserOverridden = true;
+        cycleDetectionMode();
+        this._syncShareState();
+      },
+      onToggleCctv: () => this._toggleCctvEnabled(),
+      getExpandedCityId: () => this._expandedCityId,
+      getPoiCount: (cityId) => CITY_POIS[cityId]?.pois.length || 0,
+      onPoiSelect: (cityId, index) => this._onPoiClick(cityId, index),
+    });
     this._cockpitVisionMode = 'optical';
     this._cockpitVisionRestore = null;
     this._cockpitPanelRestore = null;
@@ -1126,6 +1156,27 @@ export class StyleManager {
     // from deterministic markup defaults instead of recipient-local panel
     // preferences. Encoded panel fields are applied after all panels exist.
     this._initialShareState = this.shareLinkManager.parseInitialHash();
+    this.mapStackStyleController = new MapStackStyleController({
+      mapStackController: this.mapStackController,
+      mapStackChips: this._mapStackChips,
+      shareLinkManager: this.shareLinkManager,
+      onSyncShareState: () => this._syncShareState(),
+      onShowToast: (message) => this._showToast(message),
+      getActiveStyle: () => this.activeStyle,
+      setActiveStyle: (style) => { this.activeStyle = style; },
+      stages: this.stages,
+      onSetCelestialRingEnabled: (...args) => this.setCelestialRingEnabled(...args),
+      onStartTransition: (...args) => this._startTransition(...args),
+      onApplyStylePresetDefaults: (...args) => this._applyStylePresetDefaults(...args),
+      styleIndicator: this._styleIndicator,
+      onUpdateStyleMiniStatus: (...args) => this._updateStyleMiniStatus(...args),
+      onUpdateSliderPanel: (...args) => this._updateSliderPanel(...args),
+      onRevealStyleParameters: () => this._revealStyleParameters(),
+      hud: this.hud,
+      onUpdateHudButtonState: () => this._updateHudButtonState(),
+      onSyncIrBoost: () => this._syncIrBoost(),
+      onSyncCockpitInheritedStyle: () => this._syncCockpitInheritedStyle(),
+    });
 
     this._detectionBtn = document.getElementById('detection-toggle');
     this._models3dBtn = document.getElementById('models3d-toggle');
@@ -1872,51 +1923,7 @@ export class StyleManager {
       btn.addEventListener('click', () => this.setStyle(btn.dataset.style));
     });
 
-    // Keyboard shortcuts: 1-7, H, Escape
-    this._globalKeydownHandler = (e) => {
-      // Ignore when interacting with a form control (except Escape). Global
-      // hotkeys ('1'-'7', 'h', 'o', 'v', 'd', 'c', 'f') otherwise fire while a
-      // <select> dropdown (e.g. HUD layout) is focused and its native
-      // type-ahead is in use, or while typing in a text field (M9).
-      const isFormControl = e.target?.matches?.('select, input, textarea')
-        || e.target === this._locationSearch;
-      if (isFormControl && e.key !== 'Escape') return;
-
-      const keyMap = {
-        '1': 'normal', '2': 'retro', '3': 'surveillance',
-        '4': 'thermal', '5': 'anime', '6': 'noir',
-        '7': 'snow',
-      };
-      if (keyMap[e.key]) this.setStyle(keyMap[e.key]);
-      if (e.key === 'Escape') {
-        if (this._locationSearch.classList.contains('expanded')) {
-          this._locationSearch.classList.remove('expanded');
-          this._locationSearch.value = '';
-          this._locationSearch.blur();
-        }
-      }
-      if (e.key.toLowerCase() === 'h') {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this.hud.toggle();
-        this._updateHudButtonState();
-        this._syncShareState();
-      }
-      if (e.key.toLowerCase() === 'o') this._toggleOrbit();
-      if (e.key.toLowerCase() === 'v') this.toggleCleanView();
-      if (e.key.toLowerCase() === 'f') {
-        document.getElementById('data-panel').classList.toggle('active');
-      }
-      if (e.key.toLowerCase() === 'd') {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this._detectionUserOverridden = true;
-        cycleDetectionMode();
-        this._syncShareState();
-      }
-      if (e.key.toLowerCase() === 'c') {
-        this._toggleCctvEnabled();
-      }
-    };
-    document.addEventListener('keydown', this._globalKeydownHandler);
+    this.keyboardFocusController.attach();
 
     // Bloom toggle
     this._bloomBtn.addEventListener('click', () => {
@@ -2029,27 +2036,7 @@ export class StyleManager {
    * @returns {void}
    */
   _initMapStackControl() {
-    if (!this._mapStackChips || !this.mapStackController) return;
-
-    if (!this._mapStackChangeHandler) {
-      // Provider-driven transitions (notably Esri tile-error fallback) do not
-      // pass through `_setMapStack()`. Follow the controller's existing public
-      // event so the lit tile, the status line, AND the durable share state all
-      // describe the rendered source — without the share sync, a silent
-      // fallback leaves copyLink() encoding a stack that is no longer shown.
-      this._mapStackChangeHandler = (event) => {
-        this._renderMapStackState(event.detail);
-        this._syncShareState();
-      };
-      window.addEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-    }
-
-    renderMapStackChips(this._mapStackChips, this.mapStackController.getStacks(), {
-      activeId: this.mapStackController.getActiveId(),
-      onSelect: (stackId) => { this._setMapStack(stackId); },
-    });
-
-    this._renderMapStackState(this.mapStackController.getState());
+    this.mapStackStyleController.initMapStackControl();
   }
 
   /**
@@ -2060,17 +2047,7 @@ export class StyleManager {
    * @returns {Promise<void>}
    */
   async _setMapStack(stackId, { syncShare = true } = {}) {
-    if (!this.mapStackController) return;
-    if (syncShare) this.shareLinkManager?.claimRestoreLane?.('map');
-    const before = this.mapStackController.getActiveId();
-    this._renderMapStackState(this.mapStackController.getState('switching'));
-    const state = await this.mapStackController.setStack(stackId);
-    this._renderMapStackState(state);
-
-    if (state?.activeId === before && stackId !== before && state?.lastError) {
-      this._showToast(state.lastError);
-    }
-    if (syncShare) this._syncShareState();
+    return this.mapStackStyleController.setMapStackInternal(stackId, { syncShare });
   }
 
   /**
@@ -2081,8 +2058,7 @@ export class StyleManager {
    * @returns {void}
    */
   _renderMapStackState(state) {
-    if (!state) return;
-    syncMapStackChips(this._mapStackChips, state.activeId);
+    this.mapStackStyleController.renderMapStackState(state);
     if (this._mapStackStatus) {
       const stack = state.activeStack;
       const label = state.status === 'switching'
@@ -6110,11 +6086,7 @@ export class StyleManager {
    * @returns {void}
    */
   _pinPanelToRight(panelEl) {
-    if (!panelEl) return;
-    const rect = panelEl.getBoundingClientRect();
-    const rightOffset = Math.max(6, Math.round(window.innerWidth - rect.right));
-    panelEl.style.right = `${rightOffset}px`;
-    panelEl.style.left = 'auto';
+    this.panelLayoutController.pinPanelToRight(panelEl);
   }
 
   /**
@@ -6125,24 +6097,7 @@ export class StyleManager {
    * @returns {void}
    */
   _restorePanelPosition(panelId, panelEl) {
-    try {
-      const raw = localStorage.getItem(this._panelStorageKey(panelId));
-      if (!raw) return;
-      const pos = JSON.parse(raw);
-      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return;
-      // Clamp to the viewport: a position saved at one window size would otherwise land off-screen at
-      // another (audit U2 — observed a panel at x:-192). The drag handler clamps; restore must too.
-      const { left, top } = this._clampToViewport(Math.round(pos.left), Math.round(pos.top), panelEl);
-      panelEl.style.left = `${left}px`;
-      panelEl.style.top = `${top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      if (panelId === 'pp-toggles') {
-        this._pinPanelToRight(panelEl);
-      }
-    } catch {
-      // ignore malformed saved panel position
-    }
+    this.panelLayoutController.restorePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -6154,13 +6109,7 @@ export class StyleManager {
    * @returns {{left:number, top:number}}
    */
   _clampToViewport(left, top, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-    const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-    return {
-      left: Math.max(6, Math.min(maxLeft, left)),
-      top: Math.max(6, Math.min(maxTop, top)),
-    };
+    return this.panelLayoutController.clampToViewport(left, top, panelEl);
   }
 
   /**
@@ -6170,15 +6119,7 @@ export class StyleManager {
    * @returns {void}
    */
   _savePanelPosition(panelId, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    try {
-      localStorage.setItem(this._panelStorageKey(panelId), JSON.stringify({
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-      }));
-    } catch {
-      // storage unavailable
-    }
+    this.panelLayoutController.savePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -6201,81 +6142,11 @@ export class StyleManager {
    * @returns {void}
    */
   _promotePanelZ(panelEl) {
-    this._panelZCounter += 1;
-    if (this._panelZCounter > PANEL_Z_MAX) {
-      const promoted = [...document.querySelectorAll('.panel-draggable')]
-        .filter((el) => el.style.zIndex)
-        .sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
-      let z = PANEL_Z_BASE + 1;
-      for (const el of promoted) {
-        el.style.zIndex = String(z);
-        z += 1;
-      }
-      this._panelZCounter = z;
-    }
-    panelEl.style.zIndex = String(this._panelZCounter);
+    this.panelLayoutController.promotePanelZ(panelEl);
   }
 
   _makePanelDraggable(panelId, panelEl, handleEl) {
-    // Z-order promotion: bring clicked panel to front of the stacking context
-    panelEl.addEventListener('pointerdown', () => {
-      this._promotePanelZ(panelEl);
-    });
-
-    handleEl.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      if (event.target.closest('.panel-collapse-btn')) return;
-      if (event.target.closest('input, select, option, button:not(.panel-collapse-btn)')) return;
-
-      event.preventDefault();
-      const rect = panelEl.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const offsetX = startX - rect.left;
-      const offsetY = startY - rect.top;
-
-      panelEl.style.left = `${rect.left}px`;
-      panelEl.style.top = `${rect.top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      panelEl.classList.add('panel-dragging');
-      this._promotePanelZ(panelEl);
-
-      const onMove = (moveEvent) => {
-        const nextLeftRaw = moveEvent.clientX - offsetX;
-        const nextTopRaw = moveEvent.clientY - offsetY;
-        const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-        const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-        const nextLeft = Math.max(6, Math.min(maxLeft, nextLeftRaw));
-        const nextTop = Math.max(6, Math.min(maxTop, nextTopRaw));
-        panelEl.style.left = `${nextLeft}px`;
-        panelEl.style.top = `${nextTop}px`;
-        if (panelId === 'pp-toggles') {
-          this._layoutRightPanels();
-        }
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      const onUp = () => {
-        panelEl.classList.remove('panel-dragging');
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-        if (panelId === 'pp-toggles') {
-          this._pinPanelToRight(panelEl);
-        }
-        this._savePanelPosition(panelId, panelEl);
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
-    });
+    this.panelLayoutController.makePanelDraggable(panelId, panelEl, handleEl);
   }
 
   _buildSharePanelState() {
@@ -6603,25 +6474,7 @@ export class StyleManager {
    * @returns {Promise<{ok: boolean, activeStack?: string, error?: string|null, available?: string[]}>}
    */
   async setMapStack(stackId) {
-    if (!this.mapStackController) {
-      return { ok: false, error: 'Map stack controller unavailable' };
-    }
-    const stacks = this.mapStackController.getStacks();
-    const target = stacks.find((stack) => stack.id === stackId);
-    if (!target) {
-      return { ok: false, error: `Unknown map stack: ${stackId}`, available: stacks.map((s) => s.id) };
-    }
-    if (!target.available) {
-      return { ok: false, error: `${target.label} requires a Cesium ion token`, activeStack: this.mapStackController.getActiveId() };
-    }
-    await this._setMapStack(stackId);
-    const state = this.mapStackController.getState();
-    const landed = state.activeId === stackId;
-    return {
-      ok: landed,
-      activeStack: state.activeId,
-      error: landed ? null : (state.lastError || 'Map stack did not switch'),
-    };
+    return this.mapStackStyleController.setMapStack(stackId);
   }
 
   /**
@@ -7654,63 +7507,7 @@ export class StyleManager {
     revealParameters = applyPreset,
     restore = false,
   } = {}) {
-    if (!restore) this.shareLinkManager?.claimRestoreLane?.('visual');
-    if (styleName === this.activeStyle) {
-      if (revealParameters && styleName !== 'normal') this._revealStyleParameters();
-      return;
-    }
-
-    const previousStyle = this.activeStyle;
-    this.activeStyle = styleName;
-    document.documentElement.dataset.gevStyle = styleName;
-
-    // The celestial optics treatment belongs to the unfiltered globe only.
-    // Leaving Normal turns it off; returning merely re-enables the control.
-    this.setCelestialRingEnabled(false, { syncShare: false, focus: false });
-
-    // Transition out the previous shader style
-    if (previousStyle !== 'normal' && this.stages[previousStyle]) {
-      this._startTransition(previousStyle, this.stages[previousStyle].uniforms.intensity, 0.0);
-    }
-
-    // Transition in the new shader style
-    if (styleName !== 'normal' && this.stages[styleName]) {
-      this._startTransition(styleName, this.stages[styleName].uniforms.intensity, 1.0);
-    }
-
-    if (applyPreset) {
-      this._applyStylePresetDefaults(styleName);
-    }
-
-    // Update button UI
-    document.querySelectorAll('.style-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.style === styleName);
-    });
-
-    // Update style indicator
-    const displayNames = { surveillance: 'NVG', thermal: 'FLIR', retro: 'CRT' };
-    this._styleIndicator.textContent = displayNames[styleName] || styleName.toUpperCase();
-    this._updateStyleMiniStatus(styleName);
-
-    // Update parameter sliders
-    this._updateSliderPanel(styleName, { reveal: revealParameters });
-
-    // Notify HUD (color adaptation + auto show/hide)
-    this.hud.onStyleChange(styleName);
-    this._updateHudButtonState();
-
-    // Sync detection overlay tone to active post-process style
-    setDetectionStyle(styleName);
-    this._syncIrBoost();
-    window.dispatchEvent(new CustomEvent('gev:style-change', {
-      detail: { style: styleName },
-    }));
-
-    this._syncCockpitInheritedStyle();
-
-    // Notify share link manager
-    this.shareLinkManager.onStyleChange(styleName);
-    this._syncShareState();
+    this.mapStackStyleController.setStyle(styleName, { applyPreset, revealParameters, restore });
   }
 
   // ── Shader transitions ────────────────────────
@@ -7915,8 +7712,6 @@ export class StyleManager {
    * @returns {void}
    */
   _initLocationBar() {
-    const QWERTY_KEYS = ['Q', 'W', 'E', 'R', 'T'];
-
     // Render city pills (no submenu wrappers — POI row is separate)
     for (const [cityId, city] of Object.entries(CITY_POIS)) {
       const pill = document.createElement('button');
@@ -7927,24 +7722,7 @@ export class StyleManager {
       this._locationPills.appendChild(pill);
     }
 
-    // QWERTY keyboard navigation for POIs
-    this._poiKeydownHandler = (e) => {
-      if (!this._expandedCityId) return;
-      // Bail while a form control is focused so POI hotkeys don't fire from a
-      // <select> dropdown's type-ahead or while typing in a field (M9).
-      const isFormControl = e.target?.matches?.('select, input, textarea')
-        || e.target === this._locationSearch;
-      if (isFormControl) return;
-
-      const keyIndex = QWERTY_KEYS.indexOf(e.key.toUpperCase());
-      if (keyIndex === -1) return;
-
-      const city = CITY_POIS[this._expandedCityId];
-      if (city && keyIndex < city.pois.length) {
-        this._onPoiClick(this._expandedCityId, keyIndex);
-      }
-    };
-    document.addEventListener('keydown', this._poiKeydownHandler);
+    this.keyboardFocusController.attachPoiNavigation();
 
     // Search toggle (expand/collapse)
     this._searchToggle.addEventListener('click', () => {
@@ -8801,10 +8579,7 @@ export class StyleManager {
       window.removeEventListener('gev:awareness-subject-cleared', this._awarenessClearedHandler);
       this._awarenessClearedHandler = null;
     }
-    if (this._mapStackChangeHandler) {
-      window.removeEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-      this._mapStackChangeHandler = null;
-    }
+    this.mapStackStyleController?.dispose();
     // Invalidate any in-flight Context transaction the same way a newer request
     // would. Without this, a reinstatement already past its awaits could
     // re-enable a mode's entry layer and republish `_contextMode` while the
@@ -8889,14 +8664,7 @@ export class StyleManager {
       this._loadingVisibilityHandler = null;
     }
     this._stopLoadingFeedbackTicker();
-    if (this._globalKeydownHandler) {
-      document.removeEventListener('keydown', this._globalKeydownHandler);
-      this._globalKeydownHandler = null;
-    }
-    if (this._poiKeydownHandler) {
-      document.removeEventListener('keydown', this._poiKeydownHandler);
-      this._poiKeydownHandler = null;
-    }
+    this.keyboardFocusController?.dispose();
     // Cancel the rAF animation loop and release its governor hold; also stop
     // the traffic-chip ticker the loop no longer carries. (perf wave 2 fix)
     if (this._animFrameId) {
