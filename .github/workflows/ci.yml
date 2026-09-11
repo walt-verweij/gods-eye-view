@@ -48,6 +48,37 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+  browser-smoke:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24.14.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chrome for Testing
+        run: npx puppeteer browsers install chrome
+
+      - name: Run keyless browser smoke
+        run: timeout --signal=TERM --kill-after=10s 240s npm run test:smoke
+
+      - name: Stop smoke server
+        if: always()
+        run: pkill -f 'node_modules/vite/bin/vite.js' || true
+
   windows-onboarding:
     name: Windows onboarding
     runs-on: windows-latest
