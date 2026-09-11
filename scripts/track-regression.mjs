@@ -90,10 +90,10 @@
  *   --keep-open        Leave the browser open after the run (debugging)
  */
 
-import fs from 'node:fs';
 import puppeteer from 'puppeteer';
 import { classifyAircraft, CLASS_SCALE_3D, CLASS_MODEL_REAL } from '../src/data/aircraftClass.js';
 import { ensureGeoidReady, geoidHeight } from '../src/data/geoid.js';
+import { chromiumLaunchArgs, findChromeExecutable, SYNTHETIC_FLIGHTS } from './browser-smoke-support.mjs';
 
 // ---------------------------------------------------------------------------
 // Args
@@ -109,31 +109,6 @@ const APP_URL = getOpt('--url', 'http://localhost:4173');
 const APP_ORIGIN = new URL(APP_URL).origin;
 const HEADFUL = getFlag('--headful');
 const KEEP_OPEN = getFlag('--keep-open');
-
-const CHROME_EXECUTABLE_CANDIDATES = [
-  process.env.PUPPETEER_EXECUTABLE_PATH,
-  // Prefer puppeteer's version-pinned Chrome-for-Testing over the system
-  // Chrome: /Applications auto-updates underneath the harnesses, and its
-  // software-GL behavior shifts across majors (system Chrome 150 blew the
-  // tile-gated drain budget under SwiftShader on 2026-07-30 — six
-  // false-negative qa-cctv-v2 runs against a healthy build). A deterministic
-  // pinned browser beats the newest one for regression harnesses.
-  await puppeteer.executablePath().catch(() => null),
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-].filter(Boolean);
-
-function findChromeExecutable() {
-  for (const candidate of CHROME_EXECUTABLE_CANDIDATES) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      // Ignore inaccessible candidates and let Puppeteer fall back to its cache.
-    }
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Pretty PASS/FAIL reporting
@@ -157,12 +132,7 @@ function skip(name, why) {
 // ---------------------------------------------------------------------------
 const SYNTH = {
   // Austin load view is (-97.7431, 30.2672). Spread a few planes a few km apart.
-  flights: [
-    // [icao24, callsign, country, time_position, last_contact, lon, lat, baro_alt, on_ground, velocity, true_track]
-    { icao: 'aaa001', callsign: 'SYN001', lon: -97.7431, lat: 30.2672, alt: 9000, vel: 230, track: 90 },
-    { icao: 'aaa002', callsign: 'SYN002', lon: -97.7600, lat: 30.2800, alt: 9500, vel: 210, track: 45 },
-    { icao: 'aaa003', callsign: 'SYN003', lon: -97.7300, lat: 30.2550, alt: 8700, vel: 250, track: 135 },
-  ],
+  flights: SYNTHETIC_FLIGHTS,
   // Two real, well-formed TLEs (ISS + Hubble). SGP4 needs a valid element set;
   // these are static public catalog entries, so the propagated positions are
   // reproducible run to run.
@@ -220,27 +190,7 @@ async function main() {
     // default under SwiftShader load (same hardening as qa-focus-evidence).
     protocolTimeout: 300_000,
     ...(chromeExecutable ? { executablePath: chromeExecutable } : {}),
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      // SwiftShader only in headless: forcing it in headful defeats the whole
-      // point of --headful (real GPU). Diagnosed 2026-08-03: under this
-      // machine's Chrome 145 SwiftShader, loading the tracked military GLB
-      // kills frame production entirely (rAF stops while timers/evals stay
-      // alive), wedging any rAF-awaiting evaluation. Same policy as
-      // qa-focus-evidence: headful = real GPU.
-      ...(HEADFUL ? [] : ['--use-gl=angle', '--use-angle=swiftshader']),
-      '--disable-dev-shm-usage',
-      '--disable-web-security',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      // macOS stops frame production for fully-occluded windows, which kills
-      // rAF (and thus every rAF-awaiting evaluation) in headful runs whose
-      // window opens behind others — the qa-focus-evidence bringToFront
-      // lesson, enforced belt-and-braces here.
-      '--disable-backgrounding-occluded-windows',
-      '--window-size=1280,800',
-    ],
+    args: chromiumLaunchArgs({ headful: HEADFUL }),
   });
 
   const consoleErrors = [];
