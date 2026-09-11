@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { lookup as lookupDns } from 'node:dns/promises';
 import { Readable } from 'node:stream';
 import { normalizeRadioCountryInput } from '../../src/data/radioCountry.js';
-import { readResponseTextCapped } from '../shared.mjs';
+import { isPublicAddress, readResponseTextCapped } from '../shared.mjs';
 
 // ---------------------------------------------------------------------------
 // Radio Browser directory proxy
@@ -32,24 +32,6 @@ function cleanRadioText(value, maxLength) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength).trim();
 }
 
-function isNonGlobalIpv4(hostname) {
-  const pieces = hostname.split('.');
-  if (pieces.length !== 4 || pieces.some((piece) => !/^\d{1,3}$/.test(piece))) return false;
-  const values = pieces.map(Number);
-  if (values.some((value) => value > 255)) return true;
-  const [a, b, c] = values;
-  return a === 0 || a === 10 || a === 127 || a >= 224
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 0)
-    || (a === 192 && b === 88 && c === 99)
-    || (a === 192 && b === 168)
-    || (a === 198 && (b === 18 || b === 19))
-    || (a === 198 && b === 51 && c === 100)
-    || (a === 203 && b === 0 && c === 113);
-}
-
 /** Return a normalized public HTTPS URL, or null for local/private targets. */
 export function publicRadioHttpsUrl(value) {
   try {
@@ -60,7 +42,7 @@ export function publicRadioHttpsUrl(value) {
       hostname === 'localhost'
       || hostname.endsWith('.localhost')
       || hostname.endsWith('.local')
-      || isNonGlobalIpv4(hostname)
+      || (/^\d+(?:\.\d+){3}$/.test(hostname) && !isPublicAddress(hostname))
       || hostname.includes(':')
     ) return null;
     url.hash = '';
@@ -154,37 +136,7 @@ function radioMirrorOrigin(value) {
 
 /** Return whether a resolved Radio Browser address is safe for an outbound request. */
 export function isPublicRadioAddress(value) {
-  const address = String(value ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (!address) return false;
-  if (!address.includes(':')) {
-    const ipv4 = address.split('.');
-    return ipv4.length === 4
-      && ipv4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
-      && !isNonGlobalIpv4(address);
-  }
-  const pieces = address.split('::');
-  if (pieces.length > 2) return false;
-  const left = pieces[0] ? pieces[0].split(':') : [];
-  const right = pieces[1] ? pieces[1].split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if ((pieces.length === 1 && missing !== 0) || (pieces.length === 2 && missing < 1)) return false;
-  const groups = [...left, ...Array(Math.max(0, missing)).fill('0'), ...right];
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return false;
-  const numeric = groups.reduce((total, group) => (total << 16n) | BigInt(`0x${group}`), 0n);
-  const inCidr = (base, prefix) => {
-    const shift = 128n - BigInt(prefix);
-    return (numeric >> shift) === (base >> shift);
-  };
-  const base = (text) => text.split(':').reduce(
-    (total, group) => (total << 16n) | BigInt(`0x${group || '0'}`),
-    0n,
-  );
-  const cidr = (text, prefix) => inCidr(base(text), prefix);
-  return cidr('2000:0:0:0:0:0:0:0', 3)
-    && !cidr('2001:0:0:0:0:0:0:0', 23)
-    && !cidr('2001:db8:0:0:0:0:0:0', 32)
-    && !cidr('2002:0:0:0:0:0:0:0', 16)
-    && !cidr('3fff:0:0:0:0:0:0:0', 20);
+  return isPublicAddress(value);
 }
 
 function radioProxyDestination(value) {
