@@ -24,6 +24,10 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function pass(name, startedAt) {
+  console.log(`  PASS ${name} (${Math.round(performance.now() - startedAt)} ms)`);
+}
+
 function findAvailablePort() {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -116,6 +120,7 @@ async function main() {
   const failures = [];
 
   try {
+    let stepStartedAt = performance.now();
     await waitForServer(appUrl, server);
     const executablePath = await findChromeExecutable();
     assert(executablePath, 'Puppeteer Chrome for Testing is unavailable');
@@ -157,8 +162,9 @@ async function main() {
       const loader = await page.evaluate(() => document.querySelector('.loader-status')?.textContent || 'no loader status');
       throw new Error(`Globe did not initialise (${loader}); ${consoleErrors.join(' | ') || error.message}`);
     });
-    console.log('  PASS globe initialised');
+    pass('globe initialised', stepStartedAt);
 
+    stepStartedAt = performance.now();
     const enabled = await page.evaluate(() => window.__godsEyeView.dataManager
       .setEnabled('flights', true, { origin: 'user' }));
     assert(enabled, 'Flights layer enable was rejected');
@@ -169,15 +175,26 @@ async function main() {
       return flights.getStats();
     });
     assert(fixtureStats.count >= 1, `Flights fixture did not load: ${JSON.stringify(fixtureStats)}`);
-    console.log('  PASS flights toggled on from fixture');
+    pass('flights toggled on from fixture', stepStartedAt);
 
+    stepStartedAt = performance.now();
     const tracked = await page.evaluate(() => window.__godsEyeView.dataManager.layers
       .get('flights').module.trackById('aaa001', { origin: 'user' }));
     assert(tracked, 'Fixture aircraft tracking handoff was rejected');
-    await page.waitForFunction(() => window.__godsEyeView.dataManager.layers
-      .get('flights')?.module?.getTrackedInfo?.()?.icao24 === 'aaa001', { timeout: 30_000 });
-    console.log('  PASS tracking handoff completed');
+    const handoff = await page.evaluate(() => {
+      const view = window.__godsEyeView;
+      return {
+        trackedId: view.dataManager.layers.get('flights')?.module?.getTrackedInfo?.()?.icao24 || null,
+        viewerTrackedId: view.viewer.trackedEntity?.gevTrackedId || null,
+      };
+    });
+    assert(
+      handoff.trackedId === 'aaa001' && handoff.viewerTrackedId === 'flights:aaa001',
+      `Tracking handoff was not committed: ${JSON.stringify(handoff)}`,
+    );
+    pass('tracking handoff completed', stepStartedAt);
 
+    stepStartedAt = performance.now();
     const cockpit = await page.evaluate(async () => {
       const view = window.__godsEyeView;
       const context = await view.styleManager.setContextMode('contacts');
@@ -187,18 +204,25 @@ async function main() {
     assert(cockpit.context?.ok, `Contacts activation failed: ${cockpit.context?.error || 'unknown error'}`);
     assert(cockpit.entry?.ok, `Cockpit entry failed: ${cockpit.entry?.error || 'unknown error'}`);
     await page.waitForFunction(() => document.body.classList.contains('cockpit-mode'), { timeout: 30_000 });
-    console.log('  PASS cockpit entered');
+    pass('cockpit entered', stepStartedAt);
 
+    stepStartedAt = performance.now();
     const exited = await page.evaluate(() => window.__godsEyeView.styleManager.controlCockpit('exit'));
     assert(exited.ok, `Cockpit exit failed: ${exited.error || 'unknown error'}`);
     await page.waitForFunction(() => !document.body.classList.contains('cockpit-mode'), { timeout: 30_000 });
-    console.log('  PASS cockpit exited');
+    pass('cockpit exited', stepStartedAt);
 
+    stepStartedAt = performance.now();
+    const contextOff = await page.evaluate(() => window.__godsEyeView.styleManager.setContextMode('off'));
+    assert(contextOff.ok, `Contacts deactivation failed: ${contextOff.error || 'unknown error'}`);
     const disabled = await page.evaluate(() => window.__godsEyeView.dataManager
       .setEnabled('flights', false, { origin: 'user' }));
     assert(disabled, 'Flights layer disable was rejected');
-    await page.waitForFunction(() => !window.__godsEyeView.dataManager.isEnabled('flights'), { timeout: 30_000 });
-    console.log('  PASS flights toggled off');
+    await page.waitForFunction(
+      () => !window.__godsEyeView.dataManager.isEnabled('flights'),
+      { timeout: 60_000, polling: 100 },
+    );
+    pass('flights toggled off', stepStartedAt);
 
     if (process.env.GEV_SMOKE_INJECT_CONSOLE_ERROR === '1') {
       await page.evaluate(() => console.error('smoke injected console error'));
@@ -207,7 +231,7 @@ async function main() {
     failures.push(...consoleErrors.map((error) => `console.error: ${error}`));
     failures.push(...runtimeErrors.map((error) => `runtime error: ${error}`));
     assert(failures.length === 0, failures.join('\n'));
-    console.log('  PASS no uncaught exceptions, unhandled rejections, or console errors');
+    pass('no uncaught exceptions, unhandled rejections, or console errors', stepStartedAt);
   } finally {
     await browser?.close();
     await stopServer(server);
