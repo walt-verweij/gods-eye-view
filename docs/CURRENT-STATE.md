@@ -1714,14 +1714,14 @@ Historical planning documents may not match runtime behavior.
 ## Runtime Stack
 
 - Vite + CesiumJS app with Google Photorealistic 3D Tiles
-- Scene/HUD/style systems in `src/ui.js` and `src/hud.js`
-- Layer management in `src/data/manager.js`
+- Scene/HUD/style systems in `src/ui.js` and `src/hud.js`; the cockpit view lives in `src/cockpitViewController.js`, and panel layout, keyboard focus and map-stack style switching are controllers under `src/ui/` constructed by `StyleManager` with explicit callbacks (September 2026)
+- Layer management in `src/data/manager.js`; UI and voice code use only its public lifecycle API (`supersedeLayerVisibility` / `waitForLayerVisibilityIntent`), never private members
 - Map stack switching in `src/mapStackController.js`
 - Voice control in `src/voice/` (OpenAI Realtime over WebRTC)
 - Voice map whiteboard annotations in `src/annotations/`
 - 3D aircraft/model tracking surfaces in `src/data/flights.js` and `src/data/militaryFlights.js`
 - Detection overlay and tracked-target readout in `src/data/detection.js`, `src/data/detectionDraw.js`, and `src/data/trackedReadout.js`
-- Proxy middleware and API wiring in `vite.config.js`
+- Server-side proxies live one provider per module under `server/proxies/` (shared helpers in `server/shared.mjs`, CCTV outbound guard in `server/cctvTransport.mjs`); `vite.config.js` is the composition root that imports, registers and re-exports them (September 2026)
 
 ### Active Data Layers in Runtime
 
@@ -2418,8 +2418,13 @@ silently demoting every later lookup for the session.
 ### Proxy/Security Baseline
 
 - CCTV proxy rejects client-specified upstream URLs (server-side source allowlist only).
-- CCTV upstream still-image fetches use an explicit abort controller with an
-  eight-second timeout; the timer is cleared on every success or failure path.
+- CCTV frame and media fetches go through the outbound guard in
+  `server/cctvTransport.mjs`: pinned DNS, private/non-global destination deny,
+  manual redirect re-validation (max three hops), 8 s frame / 15 s media connect
+  timeouts, 8 MB frame cap, client-disconnect abort, Range passthrough. Operator
+  file/env camera packs may target LAN addresses; catalog sources may not.
+- Every data-feed proxy registers for both `vite` and `vite preview` through
+  `registerProxy`; key-setup endpoints stay dev-only (`src/proxyParity.test.mjs`).
 - OpenSky response cache stores successful upstream responses only; OAuth token refresh calls are coalesced.
 - A cold OpenSky failure uses the current camera subpoint only to request a cached adsb.lol point fallback capped at 250 nm. A fresh OpenSky response or last-good cache wins; a nominally successful worldwide snapshot more than two minutes old prefers viewport-scoped adsb.lol when available, otherwise the stale source is reported honestly. The fallback is visibly source-labeled and is never presented as a worldwide snapshot.
 - GBFS response size is capped; CCTV health map is bounded.
@@ -2718,6 +2723,7 @@ Replay transport uses one Play/Pause toggle plus Cancel. During ascent only the 
 - `tools/streetview-headings.mjs`: heading sweep capture; supports neighbor traversal.
 - `tools/pano-pinhole.mjs`: equirectangular-to-pinhole reprojection.
 - `tools/sat-ortho.mjs`: Map Tiles ortho stitch and centered crop with georef corners.
+- `scripts/qa-smoke.mjs`: keyless, hermetic browser smoke gate (`npm run test:smoke`, CI job `browser-smoke` on Node 24.14.0): globe init, layer toggle, tracking handoff, cockpit enter/exit, clean console; shared launch/fixture helpers in `scripts/browser-smoke-support.mjs`.
 - `scripts/track-regression.mjs`: headless real-app regression harness for aircraft tracking/model/detection invariants (`npm run test:track`).
 - `scripts/qa-map-source-tray.mjs`: browser proof for the four-source Map Source
   tray — presentation, keyboard disclosure, responsive bounds, unpinned
@@ -2735,6 +2741,8 @@ Replay transport uses one Play/Pause toggle plus Cancel. During ascent only the 
 ## Maintenance Rule
 
 When runtime behavior or architecture changes, update this file in the same change set as code updates.
+
+**Upstream updates.** This checkout tracks `bilawalsidhu/gods-eye-view`. Pull upstream into a branch, never directly onto local work; expect conflicts in `vite.config.js` (upstream keeps proxies inline, this tree keeps them under `server/proxies/`) and in `src/ui.js` (extracted controllers). Resolve by re-applying the extraction to the upstream change, then run `npm test`, `npm run build` and `npm run test:smoke` on Node 24.14.0 before merging.
 
 ## Dependency security baseline
 

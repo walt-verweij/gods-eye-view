@@ -13,7 +13,7 @@ Include repro steps and impact. We'll acknowledge, investigate, and credit you (
 
 ## How secrets are handled
 
-The golden rule: **secret-bearing API keys stay on the server side.** The dev/preview server (Vite middleware in `vite.config.js`) brokers every request that needs a private credential, so the browser never receives one.
+The golden rule: **secret-bearing API keys stay on the server side.** The dev/preview server (Vite middleware under `server/proxies/`, composed in `vite.config.js`) brokers every request that needs a private credential, so the browser never receives one.
 
 | Key | Where it lives | How the browser uses it |
 |-----|----------------|--------------------------|
@@ -44,14 +44,17 @@ option when launching through `./scripts/dev-fresh.sh`.
 
 ## Server-side proxy hardening
 
-The data proxies in `vite.config.js` are written so the browser cannot turn the server into an open relay:
+The data proxies under `server/proxies/` (one module per provider, registered from `vite.config.js`) are written so the browser cannot turn the server into an open relay:
 
-- **No arbitrary-URL fetching.** The CCTV frame proxy fetches only server-registered camera/frame URLs — clients cannot pass an upstream URL to fetch (SSRF mitigation). Other proxies target fixed upstream hosts.
+- **No arbitrary-URL fetching.** The CCTV frame and media proxies fetch only server-registered camera URLs — clients cannot pass an upstream URL to fetch (SSRF mitigation). Other proxies target fixed upstream hosts.
+- **CCTV outbound guard** (`server/cctvTransport.mjs`). Every CCTV frame and media fetch resolves DNS once, rejects loopback/private/link-local/CGNAT/multicast and non-global IPv6 destinations, pins the resolved address into the connection, follows redirects manually (at most three hops, each re-validated), enforces a time-to-response-headers timeout (8 s frames, 15 s media; a stream that has started is not cut off), caps frame bodies at 8 MB, and aborts the upstream request when the browser disconnects. Range requests still stream through for live media. **Operator exception:** camera packs loaded from `CCTV_SOURCES_FILE` / `CCTV_SOURCES_JSON` are operator-trusted and may point at LAN cameras; they keep the timeout, redirect and size limits but skip the private-address deny. Catalog-derived cameras (Austin, Caltrans, TfL) never get that bypass. The same address classifier (`isPublicAddress` in `server/shared.mjs`) backs the radio proxy.
+- **Dev and preview serve the same proxies.** Every data-feed proxy registers through one helper (`registerProxy`) for both `vite` and `vite preview`; only the key-setup endpoints (`/api/setup/*`) are dev-only, and `src/proxyParity.test.mjs` pins that contract.
 - **Radio is not an audio relay.** `/api/radio/stations` contacts only allowlisted Radio Browser HTTPS hosts and paths, rejects redirects, rejects any hostname with a loopback/private/link-local/metadata/non-public A or AAAA result, and pins each TLS connection to a validated address. It returns normalized public HTTPS stream URLs; `/api/radio/click/:uuid` applies the same destination policy and accepts only station IDs from the current bounded catalog. The browser then connects directly to the broadcaster after an explicit playback action, so the broadcaster sees the listener's IP address. GEV never proxies, caches, records, or redistributes audio.
 - **Response-size caps and timeouts** on proxied responses.
 - **Sanitized errors** — internal error details are not echoed back to clients.
 - **Coalesced OAuth refresh** and cached successful responses only (OpenSky).
-- **Redacted debug logging.** The voice debug log (`.gev-logs/`, gitignored) strips API keys, bearer tokens, client secrets, and image data URLs before writing.
+- **Redacted debug logging, browser-side only.** The voice debug log (`.gev-logs/`, gitignored) strips API keys, bearer tokens, client secrets, and image data URLs in the browser before posting to `/api/realtime/debug-log`. The server appends whatever JSON it receives (capped at 8 MB per request) without its own redaction, so on a LAN-exposed instance any client can write arbitrary content into that local file. A server-side field allowlist is an open follow-up (see `BACKLOG.md`).
+- **Log redaction review (2026-09-11).** A read-only review of every server-side log statement found no direct secret logging. Open items, all conditional on an upstream or filesystem error echoing a value: GBFS, CCTV, FIRMS and OpenSky error paths log raw `error.message`, which can contain a full upstream URL (including any key query parameter or userinfo) or a parse snippet; a few launcher and watchdog warnings print the invalid configuration value itself. Tracked in `BACKLOG.md`.
 
 ## Network exposure — the operator threat model
 
@@ -73,7 +76,7 @@ The dev server is a **key broker**: every server-side key above is spendable by 
 
 ## Scope & expectations
 
-- The Vite server is a **development/preview** server. If you expose it beyond localhost, put it behind your own auth/proxy and review the bindings (see the threat model above).
+- The Vite server is a **development/preview** server. **Supported:** localhost, or a trusted LAN via the explicit opt-in. **Not supported:** hosting it on the public internet as-is — there is no authentication layer, the rate limits are process-local and off by default, and every server-side key is spendable by any client. If you must host it, put it behind your own authenticating reverse proxy, restrict the two client-side keys at the provider, and set provider-side budgets; that setup is yours to review, not something this repository hardens.
 - All data shown is from **public** sources. See [DATA_SOURCES.md](DATA_SOURCES.md). Respect each provider's terms and rate limits.
 - The voice agent receives feed-sourced text (place names, callsigns) as scene context. It is instructed to act only via a fixed set of app-control tools and not to execute arbitrary instructions found in data, but treat model output as untrusted and keep the tool surface limited.
 

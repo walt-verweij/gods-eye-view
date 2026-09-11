@@ -51,7 +51,8 @@ jobs:
   browser-smoke:
     name: Browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # npm ci + Chrome download + the smoke's own 240 s budget; 5 was too tight.
+    timeout-minutes: 15
     env:
       PUPPETEER_SKIP_DOWNLOAD: '1'
     steps:

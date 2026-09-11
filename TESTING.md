@@ -3,8 +3,28 @@
 > [!NOTE]
 > This is a **manual field-test scenario script** for the June-2026 whiteboard +
 > tracking work. The AUTOMATED gates live elsewhere: `npm test` (unit),
-> `npm run test:track` (tracking invariants), and the headless harnesses under
-> `scripts/qa-*.mjs` — together these are the full automated test surface.
+> `npm run test:smoke` (keyless browser smoke, runs in CI), `npm run test:track`
+> (tracking invariants), and the headless harnesses under `scripts/qa-*.mjs` —
+> together these are the full automated test surface.
+>
+> **Runtime:** run every gate on Node 24.14.0 (`nvm use 24.14.0`). Node 20 is not
+> supported and hangs the unit runner inside
+> `src/annotations/annotationEngine.test.mjs`; Node 22 and 26 run the suite but
+> skip the two GC-bracketed allocation probes, which are calibrated on Node 24.
+>
+> **Browser smoke (`npm run test:smoke`):** starts Vite with every API key blank,
+> intercepts all non-app requests, feeds fixture flights, then checks globe
+> initialisation, a layer toggle, a tracking handoff, cockpit enter/exit and a
+> clean console. It fails on any uncaught exception, unhandled rejection or
+> `console.error`; `GEV_SMOKE_INJECT_CONSOLE_ERROR=1` is the negative proof. It
+> waits on an interval, never on `requestAnimationFrame`, because SwiftShader
+> stalls frames under load. Budget: under 240 s; typically 80–150 s on a loaded
+> ARM host, faster on the x86 CI runner (`browser-smoke` job in `ci.yml`).
+>
+> **Allocation probes:** audited 2026-09-11 on Node 24.14.0 with 20 isolated runs
+> per probe (`node --expose-gc --test --test-concurrency=1 <file>`):
+> `focusAllocations` 20/20 pass, `worldOverlayAllocation` 20/20 pass (runs took 2.5–10 min each under host load 12–74).
+> No instability was observed, so both stay hard gates on the pinned runtime.
 
 This guide covers the work hardened over **4 adversarial-review batches** on
 `feat/annotate-hybrid`. Record a voice note + screenshots as you go; each scenario
