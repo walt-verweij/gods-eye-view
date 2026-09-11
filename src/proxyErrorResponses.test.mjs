@@ -9,6 +9,7 @@ const source = [
   readFileSync(new URL('../server/proxies/celestrak.mjs', import.meta.url), 'utf8'),
   readFileSync(new URL('../server/proxies/rocketLaunches.mjs', import.meta.url), 'utf8'),
   readFileSync(new URL('../server/proxies/terrainHeights.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/adsbdb.mjs', import.meta.url), 'utf8'),
 ].join('\n');
 const detail = 'fixture-secret-token /internal/example <html>';
 
