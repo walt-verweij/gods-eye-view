@@ -172,6 +172,40 @@ test('analyst: nearest sorting attaches distanceKm ascending', async () => {
   assert.ok(Number.isFinite(r.items[0].distanceKm));
 });
 
+test('analyst: unknown numeric values sort last and never produce numeric summaries', async () => {
+  const records = [
+    { id: 'UNKNOWN', lat: null, lon: null, altitudeM: null, speedMps: undefined, courseDeg: 'not-a-number' },
+    { id: 'LOW', lat: 30.2, lon: -97.7, altitudeM: 1200, speedMps: 10, courseDeg: 90 },
+    { id: 'HIGH', lat: 30.3, lon: -97.8, altitudeM: 2400, speedMps: 20, courseDeg: 180 },
+  ];
+  const eng = createAnalystEngine({
+    getRecords: () => records,
+    resolveRegionRing: async () => null,
+    getViewContext: () => ({ lat: 30.27, lon: -97.74, viewRadiusKm: 150 }),
+  });
+
+  const altitudeAsc = await eng.query({ layers: ['flights'], scope: { kind: 'anywhere' }, sortBy: 'altitudeM', sortDir: 'asc', limit: 3 });
+  assert.deepEqual(altitudeAsc.items.map((item) => item.id), ['LOW', 'HIGH', 'UNKNOWN']);
+  assert.deepEqual(altitudeAsc.summary, { count: 3, altitudeMMin: 1200, altitudeMMax: 2400 });
+
+  const unknownAltitude = await eng.query({ layers: ['flights'], scope: { kind: 'anywhere' }, filters: [{ field: 'id', op: 'eq', value: 'UNKNOWN' }], sortBy: 'altitudeM' });
+  assert.deepEqual(unknownAltitude.summary, { count: 1 });
+
+  const altitudeDesc = await eng.query({ layers: ['flights'], scope: { kind: 'anywhere' }, sortBy: 'altitudeM', sortDir: 'desc', limit: 3 });
+  assert.deepEqual(altitudeDesc.items.map((item) => item.id), ['HIGH', 'LOW', 'UNKNOWN']);
+
+  const speed = await eng.query({ layers: ['flights'], scope: { kind: 'anywhere' }, sortBy: 'speedMps', sortDir: 'asc', limit: 3 });
+  assert.deepEqual(speed.items.map((item) => item.id), ['LOW', 'HIGH', 'UNKNOWN']);
+  assert.deepEqual(speed.summary, { count: 3, speedMpsMin: 10, speedMpsMax: 20 });
+
+  const heading = await eng.query({ layers: ['ais-live-vessels'], scope: { kind: 'anywhere' }, sortBy: 'courseDeg', sortDir: 'asc', limit: 3 });
+  assert.deepEqual(heading.items.map((item) => item.id), ['LOW', 'HIGH', 'UNKNOWN']);
+  assert.deepEqual(heading.summary, { count: 3, courseDegMin: 90, courseDegMax: 180 });
+
+  const distance = await eng.query({ layers: ['flights'], scope: { kind: 'anywhere' }, sortBy: 'distance', sortDir: 'desc', limit: 3 });
+  assert.deepEqual(distance.items.map((item) => item.id), ['LOW', 'HIGH', 'UNKNOWN']);
+});
+
 test('analyst: follow-up re-filters the remembered set without re-snapshot', async () => {
   const eng = makeEngine();
   await eng.query({ layers: ['flights'], scope: { kind: 'region', name: 'Texland' } });
