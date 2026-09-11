@@ -25,46 +25,11 @@
  * @module vite.config
  */
 
-import fs from 'node:fs';
-import os from 'node:os';
-import { promises as fsp } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import {
-  isValidTileCoord as isValidTomTomTile,
-  utcDayKey as tomtomUtcDayKey,
-  normalizeBudget as normalizeTomTomBudget,
-  isOverBudget as isTomTomOverBudget,
-} from './src/data/tomtomTiles.js';
-import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import cesium from 'vite-plugin-cesium';
-import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
-import {
-  normalizeRegionalArticles,
-  normalizeRegionalPlace,
-  normalizeRegionalWeather,
-} from './src/data/regionalBrief.js';
-import { parseEnv as parseDotenvText } from 'node:util';
-import { readEnvironmentSource as readPinokioEnvironmentSource } from './scripts/pinokio-environment.mjs';
-import {
-  admitKeySetupRequest,
-  isKeySetupExternallyManaged,
-  keySetupStatus,
-  knownKeySetupEnvVars,
-  upsertDotenvValues,
-  validateKeySetupUpdates,
-} from './src/keySetupCore.mjs';
-import { hardenCredentialFile } from './src/keySetupHardening.mjs';
-import {
-  fetchTerrainChunkWithRetry,
-  parseTerrainPoints,
-  resolveTerrainHeightRequest,
-  terrainPointKey,
-  validTerrainResult,
-} from './src/data/terrainHeightsProxy.js';
+import { knownKeySetupEnvVars } from './src/keySetupCore.mjs';
 import { radioBrowserProxy } from './server/proxies/radio.mjs';
 import { celestrakProxy } from './server/proxies/celestrak.mjs';
 import { rocketLaunchesProxy } from './server/proxies/rocketLaunches.mjs';
@@ -81,13 +46,17 @@ import { trackBackfillProxies } from './server/proxies/trackBackfill.mjs';
 import { openAiRealtimeProxy } from './server/proxies/openaiRealtime.mjs';
 import { googlePlacesContextProxy } from './server/proxies/googlePlacesContext.mjs';
 import { openSkyProxy } from './server/proxies/opensky.mjs';
+import { militaryInstallationsProxy } from './server/proxies/militaryInstallations.mjs';
+import { regionalBriefProxy } from './server/proxies/regionalBrief.mjs';
+import { weatherEffectsProxy } from './server/proxies/weatherEffects.mjs';
+import { keySetupEndpoint } from './server/proxies/keySetup.mjs';
 export { fetchOverpassPayload, isOverpassBoundaryQuery, overpassPayloadIsData, readOverpassDisk, resolveOverpassPreflight, simplifyOverpassPayloadBody } from './server/proxies/overpass.mjs';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './server/proxies/rocketLaunches.mjs';
 export { adsbLolFallbackAnchor } from './server/proxies/opensky.mjs';
 export { CCTV_FRAME_FETCH_TIMEOUT_MS, fetchCctvImageFromUpstream } from './server/proxies/cctv.mjs';
 export { openAiRealtimeProxy } from './server/proxies/openaiRealtime.mjs';
 export { googlePlacesContextProxy, keylessGooglePlacesResponse } from './server/proxies/googlePlacesContext.mjs';
-import { clientKey, coalesceProxyRequest, enforceOptInRateLimit, makeOptInRateLimiter, makeRateLimiter, readRequestBodyCapped, readResponseJsonCapped, readResponseTextCapped, registerProxy, requiredFiniteQueryNumber } from './server/shared.mjs';
+import { registerProxy } from './server/shared.mjs';
 export { coalesceProxyRequest, readResponseJsonCapped, readResponseTextCapped, requiredFiniteQueryNumber } from './server/shared.mjs';
 
 /** Resolve __dirname for ESM context. */
@@ -126,14 +95,9 @@ const DEV_FRESH_EXTERNAL_KEYS_AT_BOOT = new Set(
     .filter((name) => knownKeySetupEnvVars().has(name)),
 );
 
-import { militaryInstallationsProxy } from './server/proxies/militaryInstallations.mjs';
 export { MILITARY_INSTALLATION_ELEMENT_CAP, militaryInstallationCacheKey, militaryInstallationDiskFresh, militaryInstallationDiskPath, militaryInstallationFailureReason, migrateMilitaryInstallationEntry, quantizeMilitaryInstallationBox, readMilitaryInstallationDisk, resolveMilitaryInstallationTier, validMilitaryInstallationBox, writeMilitaryInstallationDisk } from './server/proxies/militaryInstallations.mjs';
 
-import { regionalBriefProxy } from './server/proxies/regionalBrief.mjs';
 export { regionalBriefHasAnySource, validRegionalPoint } from './server/proxies/regionalBrief.mjs';
-import { weatherEffectsProxy } from './server/proxies/weatherEffects.mjs';
-
-import { keySetupEndpoint } from './server/proxies/keySetup.mjs';
 
 export default defineConfig(({ mode }) => {
   // Load only this checkout's dotenv files. Shell/Keychain values still win,
