@@ -7,6 +7,7 @@ const source = [
   readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8'),
   readFileSync(new URL('../server/shared.mjs', import.meta.url), 'utf8'),
   readFileSync(new URL('../server/proxies/celestrak.mjs', import.meta.url), 'utf8'),
+  readFileSync(new URL('../server/proxies/rocketLaunches.mjs', import.meta.url), 'utf8'),
 ].join('\n');
 const detail = 'fixture-secret-token /internal/example <html>';
 

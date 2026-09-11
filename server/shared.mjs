@@ -1,6 +1,17 @@
 /** Shared proxy helpers. */
 import { isIP } from 'node:net';
 
+/** Make a proxy available in dev and preview unless explicitly opted out. */
+export function registerProxy(plugin, { preview = true } = {}) {
+  const handler = plugin.configureServer;
+  if (typeof handler !== 'function') throw new TypeError(`${plugin.name} requires configureServer`);
+  return {
+    ...plugin,
+    configureServer: handler,
+    ...(preview ? { configurePreviewServer: handler } : {}),
+  };
+}
+
 /**
  * Minimal fixed-window per-key rate limiter for the dev proxies. Not a hard
  * security boundary (dev-only), just a backstop so a runaway client can't hammer
