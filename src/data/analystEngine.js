@@ -37,6 +37,22 @@ export const ANALYST_LAYERS = {
 
 const EARTH_R_KM = 6371;
 
+/** Return a usable numeric observation, never coercing an unknown value to zero. */
+function numericValue(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+/** Order known numeric observations before unavailable ones in either direction. */
+function compareNumericValues(left, right, direction) {
+  const a = numericValue(left);
+  const b = numericValue(right);
+  if (a === null) return b === null ? 0 : 1;
+  if (b === null) return -1;
+  return (a - b) * direction;
+}
+
 /** Great-circle distance in km. */
 export function haversineKm(lat1, lon1, lat2, lon2) {
   const d2r = Math.PI / 180;
@@ -91,7 +107,7 @@ export function applyScope(records, scope, resolved) {
 function summarize(items, sortField) {
   const summary = { count: items.length };
   if (sortField && items.length) {
-    const vals = items.map((r) => Number(r[sortField])).filter(Number.isFinite);
+    const vals = items.map((r) => numericValue(r[sortField])).filter((value) => value !== null);
     if (vals.length) {
       summary[`${sortField}Min`] = Math.min(...vals);
       summary[`${sortField}Max`] = Math.max(...vals);
@@ -210,10 +226,12 @@ export function createAnalystEngine(providers) {
       }
     }
     if (sortBy) {
-      const dir = spec.sortDir === 'asc' ? 1 : -1;
-      items.sort((a, b) => (Number(a[sortBy]) - Number(b[sortBy])) * dir
+      const dir = sortBy === 'distance'
+        ? (spec.sortDir === 'desc' ? -1 : 1)
+        : (spec.sortDir === 'asc' ? 1 : -1);
+      const field = sortBy === 'distance' ? 'distanceKm' : sortBy;
+      items.sort((a, b) => compareNumericValues(a[field], b[field], dir)
         || String(a.id).localeCompare(String(b.id)));
-      if (sortBy === 'distance') items.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
     }
     const limit = Math.max(1, Math.min(50, Number(spec.limit) || 10));
     const top = items.slice(0, limit);
