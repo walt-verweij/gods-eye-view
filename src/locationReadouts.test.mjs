@@ -5,7 +5,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ui = fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8');
+const ui = [
+  fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'src', 'ui', 'mapStackStyleController.js'), 'utf8'),
+].join('\n');
 const director = fs.readFileSync(path.join(ROOT, 'src', 'scenes', 'director.js'), 'utf8');
 
 /** Source of the free-text LOCATION search handler (Enter on #location-search). */
@@ -20,11 +23,11 @@ function locationSearchHandler() {
 test('the ACTIVE STYLE indicator is written from the style name and nothing else', () => {
   // A free-text location search used to write the searched CITY into the
   // top-right style slot, so the corner read "ACTIVE STYLE / TOKYO".
-  const writes = [...ui.matchAll(/this\._styleIndicator\.textContent\s*=/g)];
+  const writes = [...ui.matchAll(/this\.styleIndicator\.textContent\s*=/g)];
   assert.equal(writes.length, 1, 'the style indicator must have exactly one writer');
   assert.match(
     ui.slice(writes[0].index, writes[0].index + 160),
-    /this\._styleIndicator\.textContent = displayNames\[styleName\] \|\| styleName\.toUpperCase\(\);/,
+    /this\.styleIndicator\.textContent = displayNames\[styleName\] \|\| styleName\.toUpperCase\(\);/,
   );
 
   const handler = locationSearchHandler();

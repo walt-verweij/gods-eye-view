@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const ui = fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8');
+const ui = [
+  fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'src', 'cockpitViewController.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'src', 'ui', 'mapStackStyleController.js'), 'utf8'),
+].join('\n');
 const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
 const sceneDirector = fs.readFileSync(path.join(ROOT, 'src', 'scenes', 'director.js'), 'utf8');
 const manager = fs.readFileSync(path.join(ROOT, 'src', 'data', 'manager.js'), 'utf8');
@@ -82,7 +86,7 @@ test('Cockpit vision cycle exposes exactly five real visual styles without NONE'
     /_syncCockpitInheritedStyle\(\)[\s\S]*?name === this\.activeStyle \? 1 : 0[\s\S]*?this\.transitions\.delete\(name\)[\s\S]*?setVisionMode\(this\.cockpitView\.visionMode\)/,
     'changing the map preset in Cockpit must refresh both the inherited label and restore baseline',
   );
-  assert.match(ui, /setStyle\([\s\S]*?this\._syncCockpitInheritedStyle\(\);/);
+  assert.match(ui, /setStyle\([\s\S]*?this\.onSyncCockpitInheritedStyle\(\);/);
 });
 
 test('Contacts uses the approved radar icon', () => {
