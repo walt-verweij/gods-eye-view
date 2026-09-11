@@ -409,6 +409,93 @@ test('visibility lifecycle events retain the exact absolute-intent epoch', async
   await mgr.destroyAll();
 });
 
+test('public lifecycle intent API reports a superseded request and its settled successor', async () => {
+  const mgr = new DataLayerManager({});
+  const layer = makeSlowLayer('rocket-launches', { updateInterval: -1 });
+  let releaseEnable;
+  let announceEnable;
+  const enableStarted = new Promise((resolve) => { announceEnable = resolve; });
+  layer.module.enable = async () => {
+    announceEnable();
+    await new Promise((resolve) => { releaseEnable = resolve; });
+  };
+  mgr.register(layer.module);
+
+  const entering = mgr.supersedeLayerVisibility('rocket-launches', true, { origin: 'context-entry' });
+  await enableStarted;
+  const userOverride = mgr.supersedeLayerVisibility('rocket-launches', false, { origin: 'user' });
+  releaseEnable();
+
+  assert.equal(await entering.promise, false);
+  const superseded = await mgr.waitForLayerVisibilityIntent(
+    'rocket-launches',
+    entering.intentEpoch,
+  );
+  const settledOverride = await mgr.waitForLayerVisibilityIntent(
+    'rocket-launches',
+    userOverride.intentEpoch,
+  );
+  assert.equal(superseded?.cancellationReason, 'superseded');
+  assert.equal(superseded?.successorIntentEpoch, userOverride.intentEpoch);
+  assert.equal(settledOverride?.succeeded, true);
+  assert.equal(mgr.isEnabled('rocket-launches'), false);
+  await mgr.destroyAll();
+});
+
+test('public lifecycle restore reports an enable failure after every target settles', async () => {
+  const mgr = new DataLayerManager({});
+  const failing = makeSlowLayer('failing', { updateInterval: -1 });
+  failing.module.enable = async () => { throw new Error('restore lifecycle failure'); };
+  mgr.register(failing.module);
+
+  await assert.rejects(
+    mgr.restoreEnabledLayerIds(new Set(['failing']), { origin: 'context-restore' }),
+    (error) => {
+      assert.match(error.message, /Failed to restore layer "failing" visibility/);
+      assert.deepEqual(error.failedLayerIds, ['failing']);
+      return true;
+    },
+  );
+  assert.equal(mgr.isEnabled('failing'), false);
+  await mgr.destroyAll();
+});
+
+test('public lifecycle user override adopts settled visibility without rerunning it', async () => {
+  const mgr = new DataLayerManager({});
+  const layer = makeSlowLayer('flights', { updateInterval: -1 });
+  mgr.register(layer.module);
+  await mgr.setEnabled('flights', true, { origin: 'context-entry' });
+
+  assert.equal(mgr.adoptLayerVisibility('flights', true, {
+    origin: 'user',
+    adoptedFromSelection: true,
+  }), true);
+  assert.equal(layer.calls.enable, 1);
+  await mgr.destroyAll();
+});
+
+test('public lifecycle teardown supersedes an in-flight visibility request', async () => {
+  const mgr = new DataLayerManager({});
+  const layer = makeSlowLayer('rocket-launches', { updateInterval: -1 });
+  let releaseEnable;
+  let announceEnable;
+  const enableStarted = new Promise((resolve) => { announceEnable = resolve; });
+  layer.module.enable = async () => {
+    announceEnable();
+    await new Promise((resolve) => { releaseEnable = resolve; });
+  };
+  mgr.register(layer.module);
+
+  const entering = mgr.supersedeLayerVisibility('rocket-launches', true, { origin: 'context-entry' });
+  await enableStarted;
+  const tearingDown = mgr.destroyLayer('rocket-launches');
+  releaseEnable();
+
+  assert.equal(await entering.promise, false);
+  assert.equal(await tearingDown, true);
+  assert.equal(mgr.layers.has('rocket-launches'), false);
+});
+
 test('programmatic ON during Clear All active OFF owns final visibility and reporting', async () => {
   const mgr = new DataLayerManager({});
   const layer = makeSlowLayer('flights', { updateInterval: -1 });
