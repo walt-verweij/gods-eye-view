@@ -3572,7 +3572,7 @@ export class StyleManager {
       let activationIntent = null;
       let terminalIntentOutcome = null;
       try {
-        activationIntent = this._dataManager._setEnabledWithIntent(
+        activationIntent = this._dataManager.supersedeLayerVisibility(
           entryLayerId,
           true,
           { notificationToken, ...(signal ? { signal } : {}) },
@@ -3583,7 +3583,7 @@ export class StyleManager {
           intentEpoch: activationIntent.intentEpoch,
         };
         activated = await activationIntent.promise;
-        terminalIntentOutcome = await this._dataManager._waitForVisibilityIntent?.(
+        terminalIntentOutcome = await this._dataManager.waitForLayerVisibilityIntent?.(
           entryLayerId,
           activationIntent.intentEpoch,
         );
@@ -3597,7 +3597,7 @@ export class StyleManager {
         ? this._contextModeReplacementIntent
         : null;
       while (replacementIntent) {
-        const outcome = await this._dataManager._waitForVisibilityIntent?.(
+        const outcome = await this._dataManager.waitForLayerVisibilityIntent?.(
           entryLayerId,
           replacementIntent.intentEpoch,
         );
