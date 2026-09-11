@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { CockpitViewController } from './cockpitViewController.js';
 import { PanelLayoutController } from './ui/panelLayoutController.js';
 import { KeyboardFocusController } from './ui/keyboardFocusController.js';
+import { MapStackStyleController } from './ui/mapStackStyleController.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -28,7 +29,6 @@ import {
   isExplicitLayerStateOrigin,
   LayerStateCoordinator,
 } from './data/layerState.js';
-import { renderMapStackChips, syncMapStackChips } from './mapStackChips.js';
 import { OrbitController } from './orbit.js';
 import {
   CelestialRing,
@@ -806,7 +806,6 @@ export class StyleManager {
     this._scopeFeatherValue = document.getElementById('scope-feather-value');
     this._mapStackChips = document.getElementById('map-stack-chips');
     this._mapStackStatus = document.getElementById('map-stack-status');
-    this._mapStackChangeHandler = null;
     this._cleanViewBtn = document.getElementById('clean-view-toggle');
     this._cleanViewExitBtn = document.getElementById('clean-view-exit');
     this._dataPanel = document.getElementById('data-panel');
@@ -1157,6 +1156,27 @@ export class StyleManager {
     // from deterministic markup defaults instead of recipient-local panel
     // preferences. Encoded panel fields are applied after all panels exist.
     this._initialShareState = this.shareLinkManager.parseInitialHash();
+    this.mapStackStyleController = new MapStackStyleController({
+      mapStackController: this.mapStackController,
+      mapStackChips: this._mapStackChips,
+      shareLinkManager: this.shareLinkManager,
+      onSyncShareState: () => this._syncShareState(),
+      onShowToast: (message) => this._showToast(message),
+      getActiveStyle: () => this.activeStyle,
+      setActiveStyle: (style) => { this.activeStyle = style; },
+      stages: this.stages,
+      onSetCelestialRingEnabled: (...args) => this.setCelestialRingEnabled(...args),
+      onStartTransition: (...args) => this._startTransition(...args),
+      onApplyStylePresetDefaults: (...args) => this._applyStylePresetDefaults(...args),
+      styleIndicator: this._styleIndicator,
+      onUpdateStyleMiniStatus: (...args) => this._updateStyleMiniStatus(...args),
+      onUpdateSliderPanel: (...args) => this._updateSliderPanel(...args),
+      onRevealStyleParameters: () => this._revealStyleParameters(),
+      hud: this.hud,
+      onUpdateHudButtonState: () => this._updateHudButtonState(),
+      onSyncIrBoost: () => this._syncIrBoost(),
+      onSyncCockpitInheritedStyle: () => this._syncCockpitInheritedStyle(),
+    });
 
     this._detectionBtn = document.getElementById('detection-toggle');
     this._models3dBtn = document.getElementById('models3d-toggle');
@@ -2016,27 +2036,7 @@ export class StyleManager {
    * @returns {void}
    */
   _initMapStackControl() {
-    if (!this._mapStackChips || !this.mapStackController) return;
-
-    if (!this._mapStackChangeHandler) {
-      // Provider-driven transitions (notably Esri tile-error fallback) do not
-      // pass through `_setMapStack()`. Follow the controller's existing public
-      // event so the lit tile, the status line, AND the durable share state all
-      // describe the rendered source — without the share sync, a silent
-      // fallback leaves copyLink() encoding a stack that is no longer shown.
-      this._mapStackChangeHandler = (event) => {
-        this._renderMapStackState(event.detail);
-        this._syncShareState();
-      };
-      window.addEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-    }
-
-    renderMapStackChips(this._mapStackChips, this.mapStackController.getStacks(), {
-      activeId: this.mapStackController.getActiveId(),
-      onSelect: (stackId) => { this._setMapStack(stackId); },
-    });
-
-    this._renderMapStackState(this.mapStackController.getState());
+    this.mapStackStyleController.initMapStackControl();
   }
 
   /**
@@ -2047,17 +2047,7 @@ export class StyleManager {
    * @returns {Promise<void>}
    */
   async _setMapStack(stackId, { syncShare = true } = {}) {
-    if (!this.mapStackController) return;
-    if (syncShare) this.shareLinkManager?.claimRestoreLane?.('map');
-    const before = this.mapStackController.getActiveId();
-    this._renderMapStackState(this.mapStackController.getState('switching'));
-    const state = await this.mapStackController.setStack(stackId);
-    this._renderMapStackState(state);
-
-    if (state?.activeId === before && stackId !== before && state?.lastError) {
-      this._showToast(state.lastError);
-    }
-    if (syncShare) this._syncShareState();
+    return this.mapStackStyleController.setMapStackInternal(stackId, { syncShare });
   }
 
   /**
@@ -2068,8 +2058,7 @@ export class StyleManager {
    * @returns {void}
    */
   _renderMapStackState(state) {
-    if (!state) return;
-    syncMapStackChips(this._mapStackChips, state.activeId);
+    this.mapStackStyleController.renderMapStackState(state);
     if (this._mapStackStatus) {
       const stack = state.activeStack;
       const label = state.status === 'switching'
@@ -6485,25 +6474,7 @@ export class StyleManager {
    * @returns {Promise<{ok: boolean, activeStack?: string, error?: string|null, available?: string[]}>}
    */
   async setMapStack(stackId) {
-    if (!this.mapStackController) {
-      return { ok: false, error: 'Map stack controller unavailable' };
-    }
-    const stacks = this.mapStackController.getStacks();
-    const target = stacks.find((stack) => stack.id === stackId);
-    if (!target) {
-      return { ok: false, error: `Unknown map stack: ${stackId}`, available: stacks.map((s) => s.id) };
-    }
-    if (!target.available) {
-      return { ok: false, error: `${target.label} requires a Cesium ion token`, activeStack: this.mapStackController.getActiveId() };
-    }
-    await this._setMapStack(stackId);
-    const state = this.mapStackController.getState();
-    const landed = state.activeId === stackId;
-    return {
-      ok: landed,
-      activeStack: state.activeId,
-      error: landed ? null : (state.lastError || 'Map stack did not switch'),
-    };
+    return this.mapStackStyleController.setMapStack(stackId);
   }
 
   /**
@@ -7536,63 +7507,7 @@ export class StyleManager {
     revealParameters = applyPreset,
     restore = false,
   } = {}) {
-    if (!restore) this.shareLinkManager?.claimRestoreLane?.('visual');
-    if (styleName === this.activeStyle) {
-      if (revealParameters && styleName !== 'normal') this._revealStyleParameters();
-      return;
-    }
-
-    const previousStyle = this.activeStyle;
-    this.activeStyle = styleName;
-    document.documentElement.dataset.gevStyle = styleName;
-
-    // The celestial optics treatment belongs to the unfiltered globe only.
-    // Leaving Normal turns it off; returning merely re-enables the control.
-    this.setCelestialRingEnabled(false, { syncShare: false, focus: false });
-
-    // Transition out the previous shader style
-    if (previousStyle !== 'normal' && this.stages[previousStyle]) {
-      this._startTransition(previousStyle, this.stages[previousStyle].uniforms.intensity, 0.0);
-    }
-
-    // Transition in the new shader style
-    if (styleName !== 'normal' && this.stages[styleName]) {
-      this._startTransition(styleName, this.stages[styleName].uniforms.intensity, 1.0);
-    }
-
-    if (applyPreset) {
-      this._applyStylePresetDefaults(styleName);
-    }
-
-    // Update button UI
-    document.querySelectorAll('.style-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.style === styleName);
-    });
-
-    // Update style indicator
-    const displayNames = { surveillance: 'NVG', thermal: 'FLIR', retro: 'CRT' };
-    this._styleIndicator.textContent = displayNames[styleName] || styleName.toUpperCase();
-    this._updateStyleMiniStatus(styleName);
-
-    // Update parameter sliders
-    this._updateSliderPanel(styleName, { reveal: revealParameters });
-
-    // Notify HUD (color adaptation + auto show/hide)
-    this.hud.onStyleChange(styleName);
-    this._updateHudButtonState();
-
-    // Sync detection overlay tone to active post-process style
-    setDetectionStyle(styleName);
-    this._syncIrBoost();
-    window.dispatchEvent(new CustomEvent('gev:style-change', {
-      detail: { style: styleName },
-    }));
-
-    this._syncCockpitInheritedStyle();
-
-    // Notify share link manager
-    this.shareLinkManager.onStyleChange(styleName);
-    this._syncShareState();
+    this.mapStackStyleController.setStyle(styleName, { applyPreset, revealParameters, restore });
   }
 
   // ── Shader transitions ────────────────────────
@@ -8664,10 +8579,7 @@ export class StyleManager {
       window.removeEventListener('gev:awareness-subject-cleared', this._awarenessClearedHandler);
       this._awarenessClearedHandler = null;
     }
-    if (this._mapStackChangeHandler) {
-      window.removeEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-      this._mapStackChangeHandler = null;
-    }
+    this.mapStackStyleController?.dispose();
     // Invalidate any in-flight Context transaction the same way a newer request
     // would. Without this, a reinstatement already past its awaits could
     // re-enable a mode's entry layer and republish `_contextMode` while the
