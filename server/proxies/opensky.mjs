@@ -85,7 +85,7 @@ const OPENSKY_SOURCE_STALE_MS = 120_000;
  *
  * @returns {Promise<string|null>} Bearer token string, or null if unavailable.
  */
-async function getOpenSkyToken() {
+export async function getOpenSkyToken() {
   const now = Date.now();
   // Return cached token if still valid (with 60 s safety margin)
   if (_openskyToken && now < _openskyTokenExpiry - 60000) return _openskyToken;
@@ -596,5 +596,4 @@ export function openSkyProxy() {
     },
   });
 }
-
 

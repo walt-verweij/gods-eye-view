@@ -965,7 +965,7 @@ function toReadable(body) {
  * @param {number} maxBytes - hard ceiling on decoded bytes.
  * @returns {Promise<{tooLarge: boolean, text: string}>}
  */
-async function readCappedResponseText(upstream, maxBytes) {
+export async function readCappedResponseText(upstream, maxBytes) {
   const declared = Number(upstream.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     try { await upstream.body?.cancel(); } catch { /* no-op */ }
