@@ -75,6 +75,7 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
+import { fetchCctvFrame, fetchCctvResponse } from './server/cctvTransport.mjs';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3558,6 +3559,9 @@ const CCTV_SOURCE_FETCH_TIMEOUT_MS = 15 * 1000;
  * client refresh cadence. A bounded miss can fall through to Street View or
  * the synthetic frame instead of leaving the browser preview pending. */
 export const CCTV_FRAME_FETCH_TIMEOUT_MS = 8 * 1000;
+/** Media must establish an upstream connection promptly, while successful live
+ * streams continue piping normally after their response headers arrive. */
+export const CCTV_MEDIA_FETCH_TIMEOUT_MS = 15 * 1000;
 /** @type {Array<object>} Cached merged + normalized CCTV source list. */
 let _cctvSourceCache = [];
 /** @type {number} Epoch-ms when the source cache was last refreshed. */
@@ -4199,6 +4203,10 @@ function normalizeSourceItem(item) {
     snapshotUrl: typeof item.snapshotUrl === 'string' ? item.snapshotUrl : '',
     license: String(item.license || item.licenseNote || ''),
     sourceKind: String(item.sourceKind || item.kind || 'configured'),
+    // File/env source packs are an operator trust boundary: they may name LAN
+    // cameras. Catalog-derived Austin, Caltrans, and TfL entries never receive
+    // this bypass and must resolve to public addresses.
+    allowPrivateAddress: item.__operatorConfiguredCctvSource === true,
     // Optional CAL badge input (cctv-v2 design §3b/§9.2, additive-only per the
     // global constraints — nothing else in this file changes): hand-authored
     // file/env catalog entries may declare poseSource:'curated' so the panel
@@ -4263,7 +4271,11 @@ async function refreshCctvSources() {
     fromTfl = tflResult.status === 'fulfilled' ? tflResult.value : [];
   }
   // Live sources first so file/env overrides win on duplicate IDs (Map last-write).
-  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromFile, ...fromEnv];
+  const configured = [...fromFile, ...fromEnv].map((item) => ({
+    ...item,
+    __operatorConfiguredCctvSource: true,
+  }));
+  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...configured];
 
   // Deduplicate by camera ID (last-write wins because of Map.set)
   const byId = new Map();
@@ -4424,7 +4436,7 @@ async function readCappedResponseText(upstream, maxBytes) {
   return { tooLarge: false, text };
 }
 
-async function proxyMediaResponse(res, upstream, { sourceHeader = 'upstream' } = {}) {
+async function proxyMediaResponse(res, upstream, { sourceHeader = 'upstream', signal } = {}) {
   const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
   const cacheControl = upstream.headers.get('cache-control') || 'no-store';
   const contentLength = upstream.headers.get('content-length');
@@ -4459,10 +4471,48 @@ async function proxyMediaResponse(res, upstream, { sourceHeader = 'upstream' } =
     return;
   }
 
-  stream.on('error', () => {
-    if (!res.writableEnded) res.end();
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', abortUpstream);
+      res.removeListener?.('close', finish);
+      resolve();
+    };
+    const abortUpstream = () => {
+      try { upstream.body?.cancel(); } catch { /* the pinned request also observes the signal */ }
+    };
+    signal?.addEventListener('abort', abortUpstream, { once: true });
+    stream.on('error', () => {
+      if (!res.writableEnded) res.end();
+      finish();
+    });
+    stream.on('end', finish);
+    res.once?.('close', finish);
+    stream.pipe(res);
   });
-  stream.pipe(res);
+}
+
+/** Bind an upstream request to its downstream client without treating a normal
+ * completed response as a disconnect. */
+function cctvClientDisconnectSignal(req, res) {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort(new Error('CCTV client disconnected'));
+  };
+  const abortOnClose = () => {
+    if (!res.writableEnded) abort();
+  };
+  req.once?.('aborted', abort);
+  res.once?.('close', abortOnClose);
+  return {
+    signal: controller.signal,
+    dispose() {
+      req.removeListener?.('aborted', abort);
+      res.removeListener?.('close', abortOnClose);
+    },
+  };
 }
 
 /**
@@ -4474,36 +4524,25 @@ async function proxyMediaResponse(res, upstream, { sourceHeader = 'upstream' } =
  *
  * @param {string} url - Server-registered upstream image URL.
  * @param {object} [options]
- * @param {typeof fetch} [options.fetchImpl=fetch] - Fetch implementation.
+ * @param {typeof fetch} [options.fetchImpl] - Injected test transport only.
  * @param {number} [options.timeoutMs=CCTV_FRAME_FETCH_TIMEOUT_MS] - Abort timeout.
  * @returns {Promise<{ok:true,body:Buffer,contentType:string}|null>}
  */
 export async function fetchCctvImageFromUpstream(url, {
-  fetchImpl = fetch,
+  fetchImpl,
+  lookupImpl,
   timeoutMs = CCTV_FRAME_FETCH_TIMEOUT_MS,
+  allowPrivateAddress = false,
+  signal,
 } = {}) {
-  if (!url || !/^https?:\/\//i.test(url)) return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    controller.abort(new DOMException('CCTV upstream frame fetch timed out', 'TimeoutError'));
-  }, timeoutMs);
-  try {
-    const upstream = await fetchImpl(url, {
-      headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
-      signal: controller.signal,
-    });
-    const contentType = upstream.headers.get('content-type') || '';
-    if (!upstream.ok || !contentType.startsWith('image/')) return null;
-    return {
-      ok: true,
-      body: Buffer.from(await upstream.arrayBuffer()),
-      contentType,
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  return fetchCctvFrame(url, {
+    fetchImpl,
+    lookupImpl,
+    timeoutMs,
+    allowPrivateAddress,
+    signal,
+    headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
+  });
 }
 
 /**
@@ -4665,12 +4704,16 @@ function cctvProxy() {
               return;
             }
 
+            const client = cctvClientDisconnectSignal(req, res);
             try {
               const upstreamHeaders = { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' };
               const requestRange = req.headers?.range;
               if (requestRange) upstreamHeaders.Range = requestRange;
-              const upstream = await fetch(mediaUrl, {
+              const upstream = await fetchCctvResponse(mediaUrl, {
                 headers: upstreamHeaders,
+                timeoutMs: CCTV_MEDIA_FETCH_TIMEOUT_MS,
+                allowPrivateAddress: source?.allowPrivateAddress === true,
+                signal: client.signal,
               });
               const contentType = upstream.headers.get('content-type') || '';
               if (!upstream.ok) {
@@ -4703,6 +4746,7 @@ function cctvProxy() {
 
               await proxyMediaResponse(res, upstream, {
                 sourceHeader: isVideoFeedType(feedType) ? 'live-media' : 'upstream-image',
+                signal: client.signal,
               });
               return;
             } catch (error) {
@@ -4715,6 +4759,8 @@ function cctvProxy() {
               res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
               res.end(JSON.stringify({ error: 'Media proxy failed' }));
               return;
+            } finally {
+              client.dispose();
             }
           }
 
@@ -4740,7 +4786,12 @@ function cctvProxy() {
             source?.snapshotUrl
             || (!isVideoFeedType(normalizeFeedType(source?.feedType)) ? source?.url : '');
 
-          const upstreamImage = await fetchCctvImageFromUpstream(upstreamCandidate);
+          const client = cctvClientDisconnectSignal(req, res);
+          const upstreamImage = await fetchCctvImageFromUpstream(upstreamCandidate, {
+            allowPrivateAddress: source?.allowPrivateAddress === true,
+            signal: client.signal,
+          });
+          client.dispose();
           if (upstreamImage?.ok) {
             setHealth(cameraId, {
               status: 'ok',
