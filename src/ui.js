@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { CockpitViewController } from './cockpitViewController.js';
+import { PanelLayoutController } from './ui/panelLayoutController.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -679,7 +680,13 @@ export class StyleManager {
     this._recordingMode = false;
     this._recordingConfig = { hidePanels: true, hudMode: 'minimal', safeFrame: '16:9' };
     this._preRecordingHudState = null;
-    this._panelZCounter = PANEL_Z_BASE + 10;
+    this.panelLayoutController = new PanelLayoutController({
+      getStorageKey: (panelId) => this._panelStorageKey(panelId),
+      onLayoutRightPanels: () => this._layoutRightPanels(),
+      onSyncCctvPanelViewport: () => this._syncCctvPanelViewport(),
+      panelZBase: PANEL_Z_BASE,
+      panelZMax: PANEL_Z_MAX,
+    });
     this._animFrameId = null;
     this._lastLoadingFeedbackUpdateAt = 0;
     this._loadingFeedbackState = createLoadingFeedbackState();
@@ -6110,11 +6117,7 @@ export class StyleManager {
    * @returns {void}
    */
   _pinPanelToRight(panelEl) {
-    if (!panelEl) return;
-    const rect = panelEl.getBoundingClientRect();
-    const rightOffset = Math.max(6, Math.round(window.innerWidth - rect.right));
-    panelEl.style.right = `${rightOffset}px`;
-    panelEl.style.left = 'auto';
+    this.panelLayoutController.pinPanelToRight(panelEl);
   }
 
   /**
@@ -6125,24 +6128,7 @@ export class StyleManager {
    * @returns {void}
    */
   _restorePanelPosition(panelId, panelEl) {
-    try {
-      const raw = localStorage.getItem(this._panelStorageKey(panelId));
-      if (!raw) return;
-      const pos = JSON.parse(raw);
-      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return;
-      // Clamp to the viewport: a position saved at one window size would otherwise land off-screen at
-      // another (audit U2 — observed a panel at x:-192). The drag handler clamps; restore must too.
-      const { left, top } = this._clampToViewport(Math.round(pos.left), Math.round(pos.top), panelEl);
-      panelEl.style.left = `${left}px`;
-      panelEl.style.top = `${top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      if (panelId === 'pp-toggles') {
-        this._pinPanelToRight(panelEl);
-      }
-    } catch {
-      // ignore malformed saved panel position
-    }
+    this.panelLayoutController.restorePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -6154,13 +6140,7 @@ export class StyleManager {
    * @returns {{left:number, top:number}}
    */
   _clampToViewport(left, top, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-    const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-    return {
-      left: Math.max(6, Math.min(maxLeft, left)),
-      top: Math.max(6, Math.min(maxTop, top)),
-    };
+    return this.panelLayoutController.clampToViewport(left, top, panelEl);
   }
 
   /**
@@ -6170,15 +6150,7 @@ export class StyleManager {
    * @returns {void}
    */
   _savePanelPosition(panelId, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    try {
-      localStorage.setItem(this._panelStorageKey(panelId), JSON.stringify({
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-      }));
-    } catch {
-      // storage unavailable
-    }
+    this.panelLayoutController.savePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -6201,81 +6173,11 @@ export class StyleManager {
    * @returns {void}
    */
   _promotePanelZ(panelEl) {
-    this._panelZCounter += 1;
-    if (this._panelZCounter > PANEL_Z_MAX) {
-      const promoted = [...document.querySelectorAll('.panel-draggable')]
-        .filter((el) => el.style.zIndex)
-        .sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
-      let z = PANEL_Z_BASE + 1;
-      for (const el of promoted) {
-        el.style.zIndex = String(z);
-        z += 1;
-      }
-      this._panelZCounter = z;
-    }
-    panelEl.style.zIndex = String(this._panelZCounter);
+    this.panelLayoutController.promotePanelZ(panelEl);
   }
 
   _makePanelDraggable(panelId, panelEl, handleEl) {
-    // Z-order promotion: bring clicked panel to front of the stacking context
-    panelEl.addEventListener('pointerdown', () => {
-      this._promotePanelZ(panelEl);
-    });
-
-    handleEl.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      if (event.target.closest('.panel-collapse-btn')) return;
-      if (event.target.closest('input, select, option, button:not(.panel-collapse-btn)')) return;
-
-      event.preventDefault();
-      const rect = panelEl.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const offsetX = startX - rect.left;
-      const offsetY = startY - rect.top;
-
-      panelEl.style.left = `${rect.left}px`;
-      panelEl.style.top = `${rect.top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      panelEl.classList.add('panel-dragging');
-      this._promotePanelZ(panelEl);
-
-      const onMove = (moveEvent) => {
-        const nextLeftRaw = moveEvent.clientX - offsetX;
-        const nextTopRaw = moveEvent.clientY - offsetY;
-        const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-        const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-        const nextLeft = Math.max(6, Math.min(maxLeft, nextLeftRaw));
-        const nextTop = Math.max(6, Math.min(maxTop, nextTopRaw));
-        panelEl.style.left = `${nextLeft}px`;
-        panelEl.style.top = `${nextTop}px`;
-        if (panelId === 'pp-toggles') {
-          this._layoutRightPanels();
-        }
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      const onUp = () => {
-        panelEl.classList.remove('panel-dragging');
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-        if (panelId === 'pp-toggles') {
-          this._pinPanelToRight(panelEl);
-        }
-        this._savePanelPosition(panelId, panelEl);
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
-    });
+    this.panelLayoutController.makePanelDraggable(panelId, panelEl, handleEl);
   }
 
   _buildSharePanelState() {
