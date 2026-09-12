@@ -1982,8 +1982,8 @@ async function loadAustinSourcesFromOpenData() {
       console.log('[CCTV] Loaded Austin camera sources:', prioritized.length);
     }
     return prioritized;
-  } catch (error) {
-    console.warn('[CCTV] Austin source download error:', error?.message || error);
+  } catch {
+    console.warn('[CCTV] AUSTIN_SOURCE_DOWNLOAD_FAILED');
     return [];
   }
 }
@@ -2020,7 +2020,7 @@ async function loadCaltransSourcesFromOpenData() {
   const cameras = [];
   for (const result of settled) {
     if (result.status !== 'fulfilled') {
-      console.warn('[CCTV] Caltrans district fetch failed:', result.reason?.message || result.reason);
+      console.warn('[CCTV] CALTRANS_DISTRICT_FETCH_FAILED');
       continue;
     }
     const { district, rows } = result.value;
@@ -2160,8 +2160,8 @@ async function loadTflSourcesFromOpenData() {
     const prioritized = prioritizeSources(cameras, maxCount, [LONDON_CENTER]);
     console.log(`[CCTV] Loaded TfL JamCam sources: ${cameras.length} available (using nearest ${prioritized.length})`);
     return prioritized;
-  } catch (error) {
-    console.warn('[CCTV] TfL JamCam download error:', error?.message || error);
+  } catch {
+    console.warn('[CCTV] TFL_JAMCAM_DOWNLOAD_FAILED');
     return [];
   }
 }

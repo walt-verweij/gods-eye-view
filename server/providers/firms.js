@@ -66,8 +66,8 @@ export function firmsProxy() {
     try {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
       await fsp.writeFile(CACHE_PATH, JSON.stringify(entry), 'utf8');
-    } catch (err) {
-      console.warn('[firms-proxy] cache write failed:', err?.message || err);
+    } catch {
+      console.warn('[firms-proxy] FIRMS_CACHE_WRITE_FAILED');
     }
   }
 
@@ -103,11 +103,8 @@ export function firmsProxy() {
         // ~131k records — RangeError, and the whole source is silently dropped.
         for (const record of records) fires.push(record);
         sources.push({ source, count: records.length, ok: true });
-      } catch (err) {
-        console.warn(
-          `[firms-proxy] ${source} fetch failed:`,
-          err?.message || err,
-        );
+      } catch {
+        console.warn(`[firms-proxy] ${source} FIRMS_SOURCE_FETCH_FAILED`);
         sources.push({ source, count: 0, ok: false });
       }
     }
@@ -149,11 +146,8 @@ export function firmsProxy() {
           return Number.isFinite(used) && Number.isFinite(limit)
             ? { used, limit }
             : null;
-        } catch (err) {
-          console.warn(
-            '[firms-proxy] mapkey status failed:',
-            err?.message || err,
-          );
+        } catch {
+          console.warn('[firms-proxy] FIRMS_STATUS_FETCH_FAILED');
           return null;
         }
       })()
@@ -229,9 +223,9 @@ export function firmsProxy() {
                 await writeDisk(fresh);
                 return fresh;
               })
-              .catch((err) => {
+              .catch(() => {
                 console.warn(
-                  `[firms-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+                  '[firms-proxy] FIRMS_REFRESH_FAILED; serving cache if any',
                 );
                 return null;
               })
@@ -250,8 +244,8 @@ export function firmsProxy() {
               error: 'firms fetch failed and no cache available',
             });
           }
-        } catch (err) {
-          console.warn('[firms-proxy] error:', err?.message || err);
+        } catch {
+          console.warn('[firms-proxy] FIRMS_REQUEST_FAILED');
           sendJson(500, { error: 'firms proxy error' });
         }
       });

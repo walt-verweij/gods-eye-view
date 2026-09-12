@@ -82,6 +82,19 @@ export function gbfsProxy() {
             return;
           }
 
+          if (upstreamUrl.username || upstreamUrl.password) {
+            res.writeHead(400, {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store',
+            });
+            res.end(
+              JSON.stringify({
+                error: 'GBFS targets must not include userinfo',
+              }),
+            );
+            return;
+          }
+
           if (!isAllowedGbfsHost(upstreamUrl.hostname)) {
             res.writeHead(403, {
               'Content-Type': 'application/json',
@@ -169,7 +182,7 @@ export function gbfsProxy() {
             res.end(JSON.stringify({ error: 'GBFS upstream timeout' }));
             return;
           }
-          console.error('[GBFS Proxy]', error?.message || String(error));
+          console.error('[GBFS Proxy] GBFS_UPSTREAM_REQUEST_FAILED');
           res.writeHead(502, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-store',
