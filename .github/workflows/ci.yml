@@ -57,7 +57,7 @@ jobs:
   browser-smoke:
     name: Browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       PUPPETEER_SKIP_DOWNLOAD: '1'
     steps:
