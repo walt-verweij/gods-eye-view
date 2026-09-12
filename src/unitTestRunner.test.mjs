@@ -6,8 +6,7 @@ import {
   allocationTestArgs,
   assertNode24AllocationRuntime,
   buildUnitTestPlan,
-  isCalibratedAllocationRuntime,
-} from '../scripts/run-unit-tests.mjs';
+  isCalibratedAllocationRuntime, isSupportedTestRuntime } from '../scripts/run-unit-tests.mjs';
 
 test('unit runner serializes only GC-bracketed allocation microbenchmarks', () => {
   const ordinary = [
@@ -64,4 +63,15 @@ test('npm test stays green on every supported engine, not only the calibrated on
   const runner = readFileSync(new URL('../scripts/run-unit-tests.mjs', import.meta.url), 'utf8');
   assert.match(runner, /GEV_REQUIRE_ALLOCATION_GATE/);
   assert.match(runner, /SKIPPED .*allocation microbenchmarks/);
+});
+
+test('the runner refuses unsupported engines instead of hanging on them', () => {
+  // Node 20 spins forever inside annotationEngine.test.mjs; refusing up front is
+  // the only honest outcome there. 24.14+ and every later major stay allowed.
+  assert.equal(isSupportedTestRuntime('20.20.2'), false);
+  assert.equal(isSupportedTestRuntime('24.13.9'), false);
+  assert.equal(isSupportedTestRuntime('24.14.0'), true);
+  assert.equal(isSupportedTestRuntime('26.1.0'), true);
+  const runner = readFileSync(new URL('../scripts/run-unit-tests.mjs', import.meta.url), 'utf8');
+  assert.match(runner, /REFUSED: Node/);
 });

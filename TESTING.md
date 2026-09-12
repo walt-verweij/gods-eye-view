@@ -7,10 +7,10 @@
 > (tracking invariants), and the headless harnesses under `scripts/qa-*.mjs` —
 > together these are the full automated test surface.
 >
-> **Runtime:** run every gate on Node 24.14.0 (`nvm use 24.14.0`). Node 20 is not
-> supported and hangs the unit runner inside
-> `src/annotations/annotationEngine.test.mjs`; Node 22 and 26 run the suite but
-> skip the two GC-bracketed allocation probes, which are calibrated on Node 24.
+> **Runtime:** run every gate on Node 24.14.0 (`nvm use 24.14.0`). The unit runner
+> refuses to start below 24.14 (Node 20 used to hang inside
+> `src/annotations/annotationEngine.test.mjs`); Node 26 runs the suite but skips
+> the two GC-bracketed allocation probes, which are calibrated on Node 24.
 >
 > **Browser smoke (`npm run test:smoke`):** starts Vite with every API key blank,
 > intercepts all non-app requests, feeds fixture flights, then checks globe

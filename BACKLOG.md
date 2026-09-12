@@ -47,11 +47,10 @@ detection and HUD wiring. Done when no single controller in `src/ui.js` exceeds 
 lines and each extracted piece constructs under the DOM stub used by
 `src/cockpitViewController.test.mjs`.
 
-## 5. Node 20 hang in the unit runner
+## 5. Node 20 hang in the unit runner (done 2026-09-12)
 
-`node --test` on Node 20 spins forever inside `src/annotations/annotationEngine.test.mjs`.
-Node 20 is outside `engines`, so this is a footgun rather than a bug. Done: `npm run doctor`
-warns on Node < 24 and the runner refuses to start there.
+`scripts/run-unit-tests.mjs` now refuses any engine below 24.14 with an explicit message
+instead of hanging; `npm run doctor` already reported it as an error.
 
 ## Status block (2026-09-11, end of the adoption-plan session)
 

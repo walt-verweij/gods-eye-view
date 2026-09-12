@@ -13,6 +13,18 @@ export function isCalibratedAllocationRuntime(version = process.versions.node) {
   return Number.parseInt(String(version).split('.')[0], 10) === 24;
 }
 
+/**
+ * Whether this runtime is inside the package's supported engines range. Node 20
+ * is not merely uncalibrated: the parallel phase spins forever inside
+ * src/annotations/annotationEngine.test.mjs, so the runner must refuse rather
+ * than hang.
+ */
+export function isSupportedTestRuntime(version = process.versions.node) {
+  const [major = 0, minor = 0] = String(version).split('.').map(Number);
+  if (major === 24) return minor >= 14;
+  return major >= 25;
+}
+
 /** Require the runtime on which allocation budgets were calibrated. */
 export function assertNode24AllocationRuntime(version = process.versions.node) {
   if (!isCalibratedAllocationRuntime(version)) {
@@ -71,6 +83,13 @@ function runTests(args) {
 }
 
 export function runUnitTests() {
+  if (!isSupportedTestRuntime()) {
+    console.error(
+      `[unit] REFUSED: Node ${process.versions.node} is below the supported engines range `
+      + '(>=24.14.0); the suite hangs on Node 20. Run `nvm use 24.14.0` (see TESTING.md).',
+    );
+    return 1;
+  }
   const plan = buildUnitTestPlan(discoverUnitTestFiles());
   const parallelStatus = runTests(['--test', ...plan.parallel]);
   if (parallelStatus !== 0) return parallelStatus;
