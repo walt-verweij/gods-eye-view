@@ -122,7 +122,7 @@ the coordinator ran 1, 6 and 11 and independently re-ran each milestone's checks
 |---|--------|
 | 1 | Baseline on Node 24.14.0: 2,867 unit tests, 0 failures, build green |
 | 2 | Analyst null-altitude and UI disposal bugs fixed with regression tests |
-| 3 | `server/cctvTransport.mjs`: pinned DNS, redirect re-validation, timeouts, byte cap, disconnect abort; operator LAN exception documented |
+| 3 | `server/providers/common/cctv-transport.js`: pinned DNS, redirect re-validation, timeouts, byte cap, disconnect abort; operator LAN exception documented |
 | 4 | `npm run test:smoke` plus the `browser-smoke` CI job; interval polling because SwiftShader stalls frames |
 | 5 | `registerProxy` helper; every feed proxy serves in preview, key setup dev-only, pinned by `src/proxyParity.test.mjs` |
 | 6 | Allocation probes 20/20 and 20/20 isolated runs; budgets stay hard gates, no code change |
@@ -132,8 +132,8 @@ the coordinator ran 1, 6 and 11 and independently re-ran each milestone's checks
 | 10 | Panel layout, keyboard focus and map-stack style controllers under `src/ui/`; `src/ui.js` 10,498 to 8,742 lines |
 | 11 | TESTING.md, SECURITY.md, docs/CURRENT-STATE.md updated; log-redaction review and follow-ups in `BACKLOG.md` |
 
-Final acceptance gate on the integration branch (tip 3db5710, Node 24.14.0, 2026-09-11):
-`GEV_REQUIRE_ALLOCATION_GATE=1 npm test` 2,888 tests, 2,887 pass, 1 skipped, 0 fail, both
-allocation probes green; `npm run build` ok; `npm run test:smoke` 7/7 steps in 25 s;
-`npm run doctor` ok. Cold review by a fresh advisor: ship, with the CI job timeout raised to
-15 minutes and two doc wordings fixed in this commit.
+Final acceptance gate on the rebased branch (upstream base aacfa06, Node 24.14.0, 2026-09-12):
+`GEV_REQUIRE_ALLOCATION_GATE=1 npm test` 2,974 tests, 2,973 pass, 1 skipped, 0 fail, both
+allocation probes green; `npm run build` ok; `npm run test:smoke` 7/7 steps in 32 s and the
+negative proof fails as required. The earlier integration branch `plan/adoption-plan` (old base
+a547e99, including milestone 7) passed the same gate on 2026-09-11 and is kept for reference.
