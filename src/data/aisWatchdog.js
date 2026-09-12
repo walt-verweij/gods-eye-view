@@ -96,8 +96,7 @@ export function parseSilenceTimeoutEnv(raw, warn) {
   if (!text) return { kind: 'default' };
   if (!/^\d+(\.\d+)?$/.test(text)) {
     warn?.(
-      `[AISStream] Ignoring AISSTREAM_SILENCE_TIMEOUT_MS="${raw}" (not a non-negative number); ` +
-        `using the ${AIS_WATCHDOG_DEFAULTS.staleMs}ms default.`,
+      '[AISStream] Invalid AISSTREAM_SILENCE_TIMEOUT_MS; using the default.',
     );
     return { kind: 'default' };
   }

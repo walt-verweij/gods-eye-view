@@ -1117,6 +1117,47 @@ const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
 const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.gev-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
 const REALTIME_DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const REALTIME_DEBUG_RECORD_FIELDS = ['timestamp', 'sessionId', 'event', 'status', 'payload'];
+
+function isRealtimeDebugSecretKey(key) {
+  return /(?:api[_-]?key|authorization|bearer|client[_-]?secret|token|secret|password)/i.test(key);
+}
+
+function sanitizeRealtimeDebugString(value) {
+  if (value.startsWith('data:image/')) {
+    return `[Redacted image data URL, ${value.length} chars]`;
+  }
+  return value
+    .replace(/sk-(?:proj-)?[A-Za-z0-9_-]{20,}/g, '[Redacted OpenAI API key]')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [Redacted]')
+    .replace(/"client_secret"\s*:\s*"[^"]+"/gi, '"client_secret":"[Redacted]"')
+    .replace(/"value"\s*:\s*"ek_[^"]+"/gi, '"value":"[Redacted ephemeral key]"');
+}
+
+function sanitizeRealtimeDebugValue(value, depth = 0) {
+  if (depth > 10) return '[MaxDepth]';
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return sanitizeRealtimeDebugString(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeRealtimeDebugValue(item, depth + 1));
+  if (typeof value !== 'object') return String(value);
+
+  const output = {};
+  for (const [key, item] of Object.entries(value)) {
+    output[key] = isRealtimeDebugSecretKey(key)
+      ? '[Redacted]'
+      : sanitizeRealtimeDebugValue(item, depth + 1);
+  }
+  return output;
+}
+
+function sanitizeRealtimeDebugRecord(record) {
+  const source = record && typeof record === 'object' && !Array.isArray(record) ? record : {};
+  return Object.fromEntries(
+    REALTIME_DEBUG_RECORD_FIELDS
+      .filter((field) => Object.hasOwn(source, field))
+      .map((field) => [field, sanitizeRealtimeDebugValue(source[field])]),
+  );
+}
 
 /**
  * Detect whether an Overpass API response body indicates rate-limiting.
@@ -1941,8 +1982,8 @@ async function loadAustinSourcesFromOpenData() {
       console.log('[CCTV] Loaded Austin camera sources:', prioritized.length);
     }
     return prioritized;
-  } catch (error) {
-    console.warn('[CCTV] Austin source download error:', error?.message || error);
+  } catch {
+    console.warn('[CCTV] AUSTIN_SOURCE_DOWNLOAD_FAILED');
     return [];
   }
 }
@@ -1979,7 +2020,7 @@ async function loadCaltransSourcesFromOpenData() {
   const cameras = [];
   for (const result of settled) {
     if (result.status !== 'fulfilled') {
-      console.warn('[CCTV] Caltrans district fetch failed:', result.reason?.message || result.reason);
+      console.warn('[CCTV] CALTRANS_DISTRICT_FETCH_FAILED');
       continue;
     }
     const { district, rows } = result.value;
@@ -2119,8 +2160,8 @@ async function loadTflSourcesFromOpenData() {
     const prioritized = prioritizeSources(cameras, maxCount, [LONDON_CENTER]);
     console.log(`[CCTV] Loaded TfL JamCam sources: ${cameras.length} available (using nearest ${prioritized.length})`);
     return prioritized;
-  } catch (error) {
-    console.warn('[CCTV] TfL JamCam download error:', error?.message || error);
+  } catch {
+    console.warn('[CCTV] TFL_JAMCAM_DOWNLOAD_FAILED');
     return [];
   }
 }
@@ -2856,7 +2897,7 @@ export function openAiRealtimeProxy() {
 
       try {
         const body = await readRequestBody(req, REALTIME_DEBUG_LOG_MAX_BYTES);
-        const record = JSON.parse(body || '{}');
+        const record = sanitizeRealtimeDebugRecord(JSON.parse(body || '{}'));
         fs.mkdirSync(REALTIME_DEBUG_LOG_DIR, { recursive: true });
         fs.appendFileSync(REALTIME_DEBUG_LOG_FILE, `${JSON.stringify({
           loggedAt: new Date().toISOString(),

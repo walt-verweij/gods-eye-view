@@ -65,6 +65,17 @@ let _openskyAuthModeWarned = false;
 const OPENSKY_AUTH_MODE_DEFAULT = 'oauth';
 /** Set of valid OPENSKY_AUTH_MODE values. */
 const OPENSKY_AUTH_MODE_SET = new Set(['basic', 'oauth', 'auto', 'anon']);
+const OPENSKY_OAUTH_ERROR_CODES = new Set([
+  'access_denied',
+  'invalid_client',
+  'invalid_grant',
+  'invalid_request',
+  'invalid_scope',
+  'server_error',
+  'temporarily_unavailable',
+  'unauthorized_client',
+  'unsupported_grant_type',
+]);
 /** Regional civilian fallback cache, keyed by a coarse 0.25° view anchor. */
 const _adsbLolPointCache = new Map();
 /** Per-anchor single-flight map for concurrent regional fallback requests. */
@@ -123,9 +134,12 @@ export async function getOpenSkyToken() {
       const expiresIn = Number(data?.expires_in);
       if (!res.ok || !accessToken) {
         if (!_openskyAuthWarned) {
-          const detail =
-            data?.error_description || data?.error || `HTTP ${res.status}`;
-          console.warn('[OpenSky] OAuth client_credentials failed:', detail);
+          const errorCode = OPENSKY_OAUTH_ERROR_CODES.has(data?.error)
+            ? data.error
+            : 'unknown';
+          console.warn(
+            `[OpenSky] OAuth client_credentials failed: HTTP ${res.status} (${errorCode})`,
+          );
           _openskyAuthWarned = true;
         }
         _openskyToken = null;
@@ -144,11 +158,10 @@ export async function getOpenSkyToken() {
       );
       _openskyAuthWarned = false;
       return _openskyToken;
-    } catch (err) {
+    } catch {
       if (!_openskyAuthWarned) {
         console.warn(
-          '[OpenSky] OAuth token request failed:',
-          err?.message || String(err),
+          '[OpenSky] OAuth token request failed: OPENSKY_TOKEN_REQUEST_FAILED',
         );
         _openskyAuthWarned = true;
       }
@@ -177,9 +190,7 @@ function normalizeOpenSkyAuthMode(value) {
   if (!raw) return OPENSKY_AUTH_MODE_DEFAULT;
   if (OPENSKY_AUTH_MODE_SET.has(raw)) return raw;
   if (!_openskyAuthModeWarned) {
-    console.warn(
-      `[OpenSky] Invalid OPENSKY_AUTH_MODE="${raw}", defaulting to "${OPENSKY_AUTH_MODE_DEFAULT}"`,
-    );
+    console.warn('[OpenSky] Invalid OPENSKY_AUTH_MODE; using default.');
     _openskyAuthModeWarned = true;
   }
   return OPENSKY_AUTH_MODE_DEFAULT;
