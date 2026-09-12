@@ -43,8 +43,17 @@ Milestone 10 extracted three controllers (panel layout, keyboard focus, map-stac
 milestone 8 the cockpit view, but `src/ui.js` is still an 8,700-line class. Remaining seams
 worth taking in the same characterisation-test-first pattern: awareness subject selection
 (`gev:awareness-subject-selected`), context mode and Contacts, share-link restore, and the
-detection and HUD wiring. Done when no single controller in `src/ui.js` exceeds roughly 2,000
-lines and each extracted piece constructs under the DOM stub used by
+detection and HUD wiring. Awareness selection is now extracted; the Display controller owns
+detection/HUD toggle and readout wiring, while Context/Contacts and share restore remain.
+Context/Contacts cannot move as one seam because `_contextModeChanging`, `_contextSessionSnapshot`,
+`_contextRestoreState`, `_contextModeEntryIntent`, and `_contextModeReplacementIntent` form one
+transaction shared by visibility guards, restore replay, cockpit exits, panel state, and voice.
+Share restore cannot move as one seam because the `ShareLinkManager.applyState` constructor
+callback mutates visual controls, panels, navigation, and layer-state restoration, while visual
+restore-lane claims are distributed across those independent owner paths. Done when the extracted
+awareness and Display controllers retain their characterisation coverage, and the remaining
+Context/Contacts and share-restoration transactions have first been split into real ownership
+boundaries; each extracted piece must construct under the DOM stub used by
 `src/cockpitViewController.test.mjs`.
 
 ## 5. Node 20 hang in the unit runner
