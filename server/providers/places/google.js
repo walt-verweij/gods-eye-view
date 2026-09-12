@@ -8,6 +8,7 @@ import {
   projectTextSearchPlaces,
 } from '../../../src/data/placeProviderPayloads.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 
 // Construct lazily after the standalone environment has loaded.
 // undefined = not built yet; null = unlimited; fn = active limiter
@@ -80,7 +81,7 @@ export function googlePlacesContextProxy({
       }
 
       try {
-        const response = await fetch(
+        const response = await guardedFetch(
           'https://places.googleapis.com/v1/places:searchNearby',
           {
             method: 'POST',
@@ -195,7 +196,7 @@ export function googlePlacesContextProxy({
       }
 
       try {
-        const response = await fetch(
+        const response = await guardedFetch(
           'https://places.googleapis.com/v1/places:searchText',
           {
             method: 'POST',
