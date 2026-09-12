@@ -15,6 +15,9 @@ import {
 // ---------------------------------------------------------------------------
 // AISStream live vessel cache state
 // ---------------------------------------------------------------------------
+// Deliberately outside the HTTP outbound guard: this is a long-lived `ws`
+// connection whose library does not expose a DNS lookup/pinned-socket seam.
+// Its fixed WSS endpoint is separately scoped and cannot follow HTTP redirects.
 const AISSTREAM_URL = 'wss://stream.aisstream.io/v0/stream';
 const AISSTREAM_DEFAULT_BBOXES = [
   [
