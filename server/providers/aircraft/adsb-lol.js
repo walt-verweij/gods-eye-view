@@ -1,4 +1,5 @@
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 
 /**
  * Vite plugin: adsb.lol military aircraft proxy with 12 s response cache.
@@ -30,7 +31,7 @@ export function adsbLolProxy() {
             res.end(_cache);
             return;
           }
-          const upstream = await fetch('https://api.adsb.lol/v2/mil', {
+          const upstream = await guardedFetch('https://api.adsb.lol/v2/mil', {
             headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
           });
           const body = await upstream.text();
