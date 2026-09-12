@@ -43,7 +43,8 @@
       "server/providers/vessels/ais-live.js",
       "src/data/adsbLolFallback.js",
       "src/data/aisStreamAdapter.js",
-      "src/data/aisWatchdog.js"
+      "src/data/aisWatchdog.js",
+      "server/providers/common/proxy.js"
     ],
     "external": ["ws"]
   },
@@ -64,7 +65,8 @@
       "server/providers/common/geo.js",
       "server/providers/common/http.js",
       "scripts/google-server-key.mjs",
-      "src/data/placeProviderPayloads.js"
+      "src/data/placeProviderPayloads.js",
+      "server/providers/common/proxy.js"
     ],
     "external": []
   },
@@ -81,7 +83,8 @@
       "server/providers/space/celestrak.js",
       "server/providers/space/launch-library.js",
       "server/providers/common/http.js",
-      "src/data/spaceProviderRequests.js"
+      "src/data/spaceProviderRequests.js",
+      "server/providers/common/proxy.js"
     ],
     "external": []
   },
@@ -95,7 +98,8 @@
     "exports": ["./server/providers/terrain"],
     "modules": [
       "server/providers/terrain.js",
-      "src/data/terrainHeightsProxy.js"
+      "src/data/terrainHeightsProxy.js",
+      "server/providers/common/proxy.js"
     ],
     "external": []
   },
@@ -107,7 +111,7 @@
   "traffic-provider": {
     "runtime": "node",
     "exports": ["./server/providers/traffic"],
-    "modules": ["server/providers/traffic.js", "src/data/tomtomTiles.js"],
+    "modules": ["server/providers/traffic.js", "src/data/tomtomTiles.js", "server/providers/common/proxy.js"],
     "external": []
   },
   "traffic-source": {
@@ -118,13 +122,13 @@
   "firms-provider": {
     "runtime": "node",
     "exports": ["./server/providers/firms"],
-    "modules": ["server/providers/firms.js", "src/data/firmsCsv.js"],
+    "modules": ["server/providers/firms.js", "src/data/firmsCsv.js", "server/providers/common/proxy.js"],
     "external": []
   },
   "gbfs-provider": {
     "runtime": "node",
     "exports": ["./server/providers/gbfs"],
-    "modules": ["server/providers/gbfs.js", "src/data/gbfsSource.js"],
+    "modules": ["server/providers/gbfs.js", "src/data/gbfsSource.js", "server/providers/common/proxy.js"],
     "external": []
   },
   "gbfs-source": {
