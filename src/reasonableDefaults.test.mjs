@@ -41,7 +41,11 @@ import {
 } from './scopeMask.js';
 import { ShareLinkManager } from './sharelink.js';
 
-const uiSource = fs.readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+const uiSource = [
+  fs.readFileSync(new URL('./ui.js', import.meta.url), 'utf8'),
+  fs.readFileSync(new URL('./ui/displayControlsController.js', import.meta.url), 'utf8'),
+].join('\n');
+const displayControlsSource = fs.readFileSync(new URL('./ui/displayControlsController.js', import.meta.url), 'utf8');
 const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const shareSource = fs.readFileSync(new URL('./sharelink.js', import.meta.url), 'utf8');
 
@@ -246,8 +250,11 @@ test('detection-on-by-default is a default, not an operator override', () => {
   // preset consults the flag, and the detection button sets it.
   assert.match(uiSource, /if \(preset\.detection && !this\._detectionUserOverridden\) \{/,
     'a style preset still yields to an operator who changed detection by hand');
-  const detectionButton = uiBlock("this._detectionBtn.addEventListener('click'", 'cycleDetectionMode()');
-  assert.match(detectionButton, /this\._detectionUserOverridden = true;/,
+  const detectionButton = displayControlsSource.slice(
+    displayControlsSource.indexOf('  cycleDetection() {'),
+    displayControlsSource.indexOf('  updateHudButtonState() {'),
+  );
+  assert.match(detectionButton, /this\.onSetDetectionUserOverridden\(\);/,
     'and the detection control still claims the override when the operator uses it');
 
   // Style-switch semantics are unchanged: Normal is still not a preset owner,

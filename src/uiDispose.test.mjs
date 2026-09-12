@@ -29,6 +29,7 @@ test('dispose completes cleanup and surfaces a failed context restore once', asy
     _stampNavigation() { calls.push('stamp-navigation'); },
     _setCockpitDisplayPortalActive() { calls.push('disable-portal'); },
     _stopLoadingFeedbackTicker() { calls.push('stop-loading-ticker'); },
+    awarenessSelectionController: { dispose() {} },
     cockpitView: { dispose() { calls.push('dispose-cockpit'); } },
     _dataManagerUnsubscribe() { calls.push('unsubscribe-data-manager'); },
     transitions: { clear() { calls.push('clear-transitions'); } },

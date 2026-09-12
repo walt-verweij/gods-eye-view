@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { CockpitViewController } from './cockpitViewController.js';
 import { AwarenessSelectionController } from './ui/awarenessSelectionController.js';
+import { DisplayControlsController } from './ui/displayControlsController.js';
 import { PanelLayoutController } from './ui/panelLayoutController.js';
 import { KeyboardFocusController } from './ui/keyboardFocusController.js';
 import { MapStackStyleController } from './ui/mapStackStyleController.js';
@@ -945,24 +946,35 @@ export class StyleManager {
 
     // Intel HUD
     this.hud = new IntelHUD(viewer);
+    this.displayControlsController = new DisplayControlsController({
+      hud: this.hud,
+      hudButton: this._hudBtn,
+      hudLayoutRow: this._hudLayoutRow,
+      hudLayoutSelect: this._hudLayoutSelect,
+      detectionButton: this._detectionBtn,
+      detectionSliderRow: this._detectionSliderRow,
+      detectionAllocationRow: this._detectionAllocationRow,
+      detectionFadeRow: this._detectionFadeRow,
+      detectionOpacityRow: this._detectionOpacityRow,
+      cockpitDisplayToggleButton: this._cockpitDisplayToggleBtn,
+      shareLinkManager: this.shareLinkManager,
+      onSyncShareState: () => this._syncShareState(),
+      onSetHudVariant: (variant) => this._setHudVariant(variant),
+      onScheduleAdaptivePanelLayout: (options) => this._scheduleAdaptivePanelLayout(options),
+      onLayoutRightPanels: () => this._layoutRightPanels(),
+      onSetDetectionUserOverridden: () => { this._detectionUserOverridden = true; },
+      onCycleDetection: () => cycleDetectionMode(),
+      onSetCockpitDisclosure: (...args) => this._setCockpitDisclosure?.(...args),
+      onInitCockpitDisplayPortal: () => this._initCockpitDisplayPortal(),
+    });
     this.keyboardFocusController = new KeyboardFocusController({
       getLocationSearch: () => this._locationSearch,
       onSetStyle: (style) => this.setStyle(style),
-      onToggleHud: () => {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this.hud.toggle();
-        this._updateHudButtonState();
-        this._syncShareState();
-      },
+      onToggleHud: () => this.displayControlsController.toggleHud(),
       onToggleOrbit: () => this._toggleOrbit(),
       onToggleCleanView: () => this.toggleCleanView(),
       onToggleDataPanel: () => document.getElementById('data-panel').classList.toggle('active'),
-      onCycleDetection: () => {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this._detectionUserOverridden = true;
-        cycleDetectionMode();
-        this._syncShareState();
-      },
+      onCycleDetection: () => this.displayControlsController.cycleDetection(),
       onToggleCctv: () => this._toggleCctvEnabled(),
       getExpandedCityId: () => this._expandedCityId,
       getPoiCount: (cityId) => CITY_POIS[cityId]?.pois.length || 0,
@@ -8258,32 +8270,7 @@ export class StyleManager {
   }
 
   _initHUDToggle() {
-    this._hudBtn.addEventListener('click', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      this.hud.toggle();
-      this._updateHudButtonState();
-      this._syncShareState();
-    });
-
-    if (this._hudLayoutSelect) {
-      this._hudLayoutSelect.value = 'tactical';
-    }
-    this._setHudVariant('tactical');
-    this.hud.setMode('on');
-    this._updateHudButtonState();
-
-    // Detection toggle button
-    this._detectionBtn.addEventListener('click', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      this._detectionUserOverridden = true;
-      cycleDetectionMode();
-      this._syncShareState();
-    });
-    this._cockpitDisplayToggleBtn?.addEventListener('click', () => {
-      const open = this._cockpitDisplayToggleBtn.getAttribute('aria-expanded') === 'true';
-      this._setCockpitDisclosure?.('display', !open);
-    });
-    this._initCockpitDisplayPortal();
+    this.displayControlsController.init();
   }
 
   /**
@@ -8385,11 +8372,7 @@ export class StyleManager {
    * @returns {void}
    */
   _updateHudButtonState() {
-    this._hudBtn.classList.toggle('active', this.hud.visible);
-    if (this._hudLayoutRow) {
-      this._hudLayoutRow.classList.toggle('visible', this.hud.visible);
-    }
-    this._scheduleAdaptivePanelLayout({ settle: true });
+    this.displayControlsController.updateHudButtonState();
   }
 
   /**
@@ -8400,39 +8383,7 @@ export class StyleManager {
    * @returns {void}
    */
   _updateDetectionButton(modeLabel) {
-    const btn = this._detectionBtn;
-    const enabled = modeLabel !== 'OFF';
-    btn.setAttribute('aria-pressed', String(enabled));
-    btn.setAttribute('aria-label', enabled
-      ? `Detection overlay: ${String(modeLabel).toLowerCase()}`
-      : 'Detection overlay: off');
-    btn.classList.remove('active', 'god', 'panoptic');
-    if (modeLabel === 'SPARSE') {
-      btn.querySelector('.pp-label').textContent = 'SPARSE';
-      btn.classList.add('active');
-    } else if (modeLabel === 'BALANCED') {
-      btn.querySelector('.pp-label').textContent = 'BALANCED';
-      btn.classList.add('active');
-    } else if (modeLabel === 'DENSE') {
-      btn.querySelector('.pp-label').textContent = 'DENSE';
-      btn.classList.add('active', 'panoptic');
-    } else {
-      btn.querySelector('.pp-label').textContent = 'DETECT';
-    }
-
-    if (this._detectionSliderRow) {
-      this._detectionSliderRow.classList.toggle('visible', modeLabel !== 'OFF');
-    }
-    if (this._detectionAllocationRow) {
-      this._detectionAllocationRow.classList.toggle('visible', modeLabel !== 'OFF');
-    }
-    if (this._detectionFadeRow) {
-      this._detectionFadeRow.classList.toggle('visible', modeLabel !== 'OFF');
-    }
-    if (this._detectionOpacityRow) {
-      this._detectionOpacityRow.classList.toggle('visible', modeLabel !== 'OFF');
-    }
-    this._layoutRightPanels();
+    this.displayControlsController.updateDetectionButton(modeLabel);
   }
 
   /**
