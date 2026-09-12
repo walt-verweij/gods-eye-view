@@ -8,8 +8,10 @@ const uiSource = [
   fs.readFileSync(new URL('./ui.js', import.meta.url), 'utf8'),
   fs.readFileSync(new URL('./ui/keyboardFocusController.js', import.meta.url), 'utf8'),
   fs.readFileSync(new URL('./ui/mapStackStyleController.js', import.meta.url), 'utf8'),
+  fs.readFileSync(new URL('./ui/displayControlsController.js', import.meta.url), 'utf8'),
 ].join('\n');
 const mapStackStyleSource = fs.readFileSync(new URL('./ui/mapStackStyleController.js', import.meta.url), 'utf8');
+const displayControlsSource = fs.readFileSync(new URL('./ui/displayControlsController.js', import.meta.url), 'utf8');
 
 function sourceBlock(start, end) {
   const startIndex = uiSource.indexOf(start);
@@ -442,9 +444,9 @@ test('every explicit visual UI gesture claims restore authority before it mutate
     assertClaimsBefore(initUi.slice(startIndex, endIndex), mutation, label);
   }
 
-  for (const [start, end, callback, nextCallback, mutation, label] of [
-    ["if (event.key.toLowerCase() === 'h')", "if (event.key.toLowerCase() === 'o')", 'this.onToggleHud()', 'onToggleOrbit:', 'this.hud.toggle()', 'HUD hotkey'],
-    ["if (event.key.toLowerCase() === 'd')", "if (event.key.toLowerCase() === 'c')", 'this.onCycleDetection()', 'onToggleCctv:', 'cycleDetectionMode()', 'detection hotkey'],
+  for (const [start, end, callback, nextCallback, controllerCallback, mutation, label] of [
+    ["if (event.key.toLowerCase() === 'h')", "if (event.key.toLowerCase() === 'o')", 'this.onToggleHud()', 'onToggleOrbit:', 'toggleHud()', 'this.hud.toggle()', 'HUD hotkey'],
+    ["if (event.key.toLowerCase() === 'd')", "if (event.key.toLowerCase() === 'c')", 'this.onCycleDetection()', 'onToggleCctv:', 'cycleDetection()', 'this.onCycleDetection()', 'detection hotkey'],
   ]) {
     const startIndex = keyboardAttach.indexOf(start);
     const endIndex = keyboardAttach.indexOf(end, startIndex + start.length);
@@ -454,24 +456,29 @@ test('every explicit visual UI gesture claims restore authority before it mutate
     const callbackStart = keyboardWiring.indexOf(`${callbackName}:`);
     const callbackEnd = keyboardWiring.indexOf(nextCallback, callbackStart);
     assert.ok(callbackStart >= 0 && callbackEnd > callbackStart, `${label} callback wiring is missing`);
-    assertClaimsBefore(keyboardWiring.slice(callbackStart, callbackEnd), mutation, label);
+    assert.match(keyboardWiring.slice(callbackStart, callbackEnd), /this\.displayControlsController\./);
+    const controllerStart = displayControlsSource.indexOf(`  ${controllerCallback}`);
+    const controllerEnd = displayControlsSource.indexOf('\n  }', controllerStart) + 4;
+    assert.ok(controllerStart >= 0 && controllerEnd > controllerStart, `${label} controller callback is missing`);
+    assertClaimsBefore(displayControlsSource.slice(controllerStart, controllerEnd), mutation, label);
   }
 
-  const hudToggle = sourceBlock('  _initHUDToggle() {', '  _initCockpitDisplayPortal() {');
+  const hudToggle = displayControlsSource.slice(
+    displayControlsSource.indexOf('  toggleHud() {'),
+    displayControlsSource.indexOf('  updateHudButtonState() {'),
+  );
   assertClaimsBefore(
-    hudToggle.slice(
-      hudToggle.indexOf("this._hudBtn.addEventListener('click'"),
-      hudToggle.indexOf('if (this._hudLayoutSelect)'),
-    ),
+    hudToggle,
     'this.hud.toggle()',
     'HUD button',
   );
+  const detectionToggle = displayControlsSource.slice(
+    displayControlsSource.indexOf('  cycleDetection() {'),
+    displayControlsSource.indexOf('  updateHudButtonState() {'),
+  );
   assertClaimsBefore(
-    hudToggle.slice(
-      hudToggle.indexOf("this._detectionBtn.addEventListener('click'"),
-      hudToggle.indexOf('this._cockpitDisplayToggleBtn'),
-    ),
-    'cycleDetectionMode()',
+    detectionToggle,
+    'this.onCycleDetection()',
     'detection button',
   );
 });
