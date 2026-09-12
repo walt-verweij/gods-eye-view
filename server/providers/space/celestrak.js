@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { celestrakTleUrl } from '../../../src/data/spaceProviderRequests.js';
+import { registerProxy } from '../common/proxy.js';
 
 /**
  * Vite plugin: CelesTrak TLE proxy.
@@ -66,7 +67,7 @@ export function celestrakProxy() {
     return { at: Date.now(), body };
   }
 
-  return {
+  return registerProxy({
     name: 'celestrak-proxy',
     configureServer(server) {
       server.middlewares.use('/api/celestrak', async (req, res) => {
@@ -133,5 +134,5 @@ export function celestrakProxy() {
         }
       });
     },
-  };
+  });
 }

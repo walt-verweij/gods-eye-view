@@ -968,6 +968,23 @@ export class DataLayerManager {
   }
 
   /**
+   * Supersede any prior absolute visibility request and retain its exact
+   * intent handle. Focused modes use the handle to distinguish their own
+   * activation from a newer operator request without reading manager state.
+   */
+  supersedeLayerVisibility(layerId, shouldEnable, {
+    origin = 'programmatic',
+    signal = null,
+    notificationToken = null,
+  } = {}) {
+    return this._setEnabledWithIntent(layerId, shouldEnable, {
+      origin,
+      signal,
+      notificationToken,
+    });
+  }
+
+  /**
    * Internal absolute-visibility request with an exact intent handle.
    * The ordinary setEnabled() promise remains the public control contract.
    */
@@ -1307,6 +1324,14 @@ export class DataLayerManager {
   async _waitForVisibilityIntent(layerId, intentEpoch) {
     const record = this.layers.get(layerId)?.visibilityIntentRecords?.get(intentEpoch);
     return record ? record.settled : null;
+  }
+
+  /**
+   * Wait for the exact visibility request created by supersedeLayerVisibility.
+   * The terminal record preserves supersession details for focused-mode logic.
+   */
+  async waitForLayerVisibilityIntent(layerId, intentEpoch) {
+    return this._waitForVisibilityIntent(layerId, intentEpoch);
   }
 
   /**

@@ -1,3 +1,5 @@
+import { registerProxy } from '../common/proxy.js';
+
 /**
  * Vite plugin: adsb.lol military aircraft proxy with 12 s response cache.
  *
@@ -13,7 +15,7 @@ export function adsbLolProxy() {
   let _cacheAt = 0;
   /** Response cache TTL (ms). */
   const CACHE_MS = 12000;
-  return {
+  return registerProxy({
     name: 'adsblol-proxy',
     configureServer(server) {
       server.middlewares.use('/api/adsblol/mil', async (req, res) => {
@@ -57,5 +59,5 @@ export function adsbLolProxy() {
         }
       });
     },
-  };
+  });
 }

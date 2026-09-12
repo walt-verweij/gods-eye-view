@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { registerProxy } from '../common/proxy.js';
 /**
  * adsbdb.com enrichment proxy: callsign → route (airline + origin/destination
  * airports) and hex → aircraft type/registration. Free community API — cached
@@ -107,7 +108,7 @@ export function adsbdbProxy() {
     return inflight.get(ik);
   }
 
-  return {
+  return registerProxy({
     name: 'adsbdb-proxy',
     configureServer(server) {
       server.middlewares.use('/api/adsbdb', async (req, res) => {
@@ -147,5 +148,5 @@ export function adsbdbProxy() {
         }
       });
     },
-  };
+  });
 }

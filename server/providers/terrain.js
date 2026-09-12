@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { registerProxy } from './common/proxy.js';
 
 import {
   fetchTerrainChunkWithRetry,
@@ -131,7 +132,7 @@ export function terrainHeightsProxy() {
     return inflight.get(key);
   }
 
-  return {
+  return registerProxy({
     name: 'terrain-heights-proxy',
     configureServer(server) {
       server.middlewares.use('/api/terrain/heights', async (req, res) => {
@@ -179,5 +180,5 @@ export function terrainHeightsProxy() {
         }
       });
     },
-  };
+  });
 }

@@ -1,4 +1,8 @@
 import * as Cesium from 'cesium';
+import { CockpitViewController } from './cockpitViewController.js';
+import { PanelLayoutController } from './ui/panelLayoutController.js';
+import { KeyboardFocusController } from './ui/keyboardFocusController.js';
+import { MapStackStyleController } from './ui/mapStackStyleController.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -25,7 +29,6 @@ import {
   isExplicitLayerStateOrigin,
   LayerStateCoordinator,
 } from './data/layerState.js';
-import { renderMapStackChips, syncMapStackChips } from './mapStackChips.js';
 import { OrbitController } from './orbit.js';
 import {
   CelestialRing,
@@ -652,1538 +655,6 @@ function setCockpitRollingValue(element, text, numericValue, {
   element.replaceChildren(fragment);
 }
 
-class CockpitViewController {
-  constructor(viewer, {
-    onVisionChange = null,
-    onCameraTakeover = null,
-    isEntryAllowed = null,
-    onEntered = null,
-    onExited = null,
-    getInheritedVisionLabel = null,
-    restoreTrackingFrame = null,
-  } = {}) {
-    this.viewer = viewer;
-    this.active = false;
-    this.trackedEntity = null;
-    this.trackedEntityWasShown = true;
-    this.heading = null;
-    this.lastFrameMs = 0;
-    this.lastCameraUpdateMs = 0;
-    this.lastHudUpdateMs = 0;
-    this.lastContextUpdateMs = 0;
-    this.lastGroundProbeMs = 0;
-    this.contextNavigationDeadlineMs = 0;
-    this.surfaceWaitStartedMs = 0;
-    this.surfaceAcquiring = false;
-    this.surfaceFallback = false;
-    this.lastCompassSignature = '';
-    this.entry = document.getElementById('cockpit-entry');
-    this.tr3bToggle = document.getElementById('tr3b-toggle');
-    this._tr3bSignature = null;
-    this.mapViewButton = document.getElementById('map-view-switch');
-    this.resetGlobeButton = document.getElementById('cockpit-reset-globe');
-    this.hud = document.getElementById('cockpit-hud');
-    this.entryFocusOrigin = null;
-    this.callsign = document.getElementById('cockpit-callsign');
-    this.speed = document.getElementById('cockpit-speed-value');
-    this.speedRim = document.getElementById('cockpit-speed-rim');
-    this.speedRimValue = document.getElementById('cockpit-speed-rim-value');
-    this.speedRimTicks = Array.from(document.querySelectorAll('[data-speed-rim-tick]'));
-    this.altitude = document.getElementById('cockpit-altitude-value');
-    this.altitudeRim = document.getElementById('cockpit-altitude-rim');
-    this.altitudeRimValue = document.getElementById('cockpit-altitude-rim-value');
-    this.altitudeRimTicks = Array.from(document.querySelectorAll('[data-altitude-rim-tick]'));
-    this.headingValue = document.getElementById('cockpit-heading-value');
-    this.compassTape = document.getElementById('cockpit-compass-tape');
-    this.clock = document.getElementById('cockpit-clock');
-    this.position = document.getElementById('cockpit-position');
-    this.aircraftMeta = document.getElementById('cockpit-aircraft-meta');
-    this.route = document.getElementById('cockpit-route');
-    this.routeFrom = document.getElementById('cockpit-route-from');
-    this.routeTo = document.getElementById('cockpit-route-to');
-    this.routeStatus = document.getElementById('cockpit-route-status');
-    this.routeDirection = document.getElementById('cockpit-route-direction');
-    this.routeDirectionLabel = document.getElementById('cockpit-route-direction-label');
-    this.visionPrevious = document.getElementById('cockpit-vision-previous');
-    this.visionCurrent = document.getElementById('cockpit-vision-current');
-    this.visionCurrentLabel = document.getElementById('cockpit-vision-current-label');
-    this.visionNext = document.getElementById('cockpit-vision-next');
-    this.visionMode = 'optical';
-    this.onVisionChange = onVisionChange;
-    this.onCameraTakeover = onCameraTakeover;
-    this.onEntered = onEntered;
-    this.onExited = onExited;
-    this.getInheritedVisionLabel = typeof getInheritedVisionLabel === 'function'
-      ? getInheritedVisionLabel
-      : () => 'NORMAL';
-    this.restoreTrackingFrame = typeof restoreTrackingFrame === 'function'
-      ? restoreTrackingFrame
-      : () => false;
-    this.isEntryAllowed = typeof isEntryAllowed === 'function' ? isEntryAllowed : () => true;
-    this.context = document.getElementById('cockpit-context');
-    this.contextSubject = document.getElementById('cockpit-context-subject');
-    this.contextNearestLabel = document.getElementById('cockpit-context-nearest-label');
-    this.contextBearing = document.getElementById('cockpit-context-bearing');
-    this.contextDistance = document.getElementById('cockpit-context-distance');
-    this.contextDirection = document.getElementById('cockpit-context-direction');
-    this.contextUncertainty = document.getElementById('cockpit-context-uncertainty');
-    this.contextUpdated = document.getElementById('cockpit-context-updated');
-    this.contextCohorts = new Map(Array.from(document.querySelectorAll('[data-context-cohort]'))
-      .map((element) => [element.dataset.contextCohort, element]));
-    this.contextPrevious = document.getElementById('cockpit-context-previous');
-    this.contextNext = document.getElementById('cockpit-context-next');
-    this.contextToggle = document.getElementById('cockpit-context-toggle');
-    this.weatherToggle = document.getElementById('cockpit-weather-toggle');
-    this.weatherState = document.getElementById('cockpit-weather-state');
-    this.contextCollapsed = false;
-    this.signalStream = document.getElementById('cockpit-signal-stream');
-    this.signalList = document.getElementById('cockpit-signal-list');
-    this.signalToggle = document.getElementById('cockpit-signal-toggle');
-    this.briefKicker = document.getElementById('cockpit-brief-kicker');
-    this.briefSubtitle = document.getElementById('cockpit-brief-subtitle');
-    this.briefPrevious = document.getElementById('cockpit-brief-previous');
-    this.briefNext = document.getElementById('cockpit-brief-next');
-    this.briefAutoToggle = document.getElementById('cockpit-brief-auto');
-    this.briefPosition = document.getElementById('cockpit-brief-position');
-    this.briefSource = document.getElementById('cockpit-brief-source');
-    this.briefPages = Array.from(document.querySelectorAll('[data-cockpit-brief-page]'));
-    this.briefTabs = Array.from(document.querySelectorAll('[data-cockpit-brief-index]'));
-    this.newsStatus = document.getElementById('cockpit-news-status');
-    this.newsList = document.getElementById('cockpit-news-list');
-    this.localPlace = document.getElementById('cockpit-local-place');
-    this.localCoordinates = document.getElementById('cockpit-local-coordinates');
-    this.localTemperature = document.getElementById('cockpit-local-temperature');
-    this.localWind = document.getElementById('cockpit-local-wind');
-    this.localWindDirection = document.getElementById('cockpit-local-wind-direction');
-    this.localCondition = document.getElementById('cockpit-local-condition');
-    this.localCloud = document.getElementById('cockpit-local-cloud');
-    this.localPrecipitation = document.getElementById('cockpit-local-precipitation');
-    this.signalCollapsed = false;
-    this.signalUserCollapsed = false;
-    this.signalItems = [];
-    this.signalSignatures = new Map();
-    this.briefPageIndex = 0;
-    this.briefAutoRotateEnabled = false;
-    this.briefTimer = null;
-    this.lastAircraftInfo = null;
-    this.regionalBrief = null;
-    this.regionalBriefAnchor = null;
-    this.regionalBriefFetchedAt = 0;
-    this.regionalBriefAbort = null;
-    this.regionalBriefRequestToken = 0;
-    this.regionalBriefSubjectId = null;
-    this.contextLayoutFrame = null;
-    this.contextLayoutStamp = null;
-    this.scratchTarget = new Cesium.Cartesian3();
-    this.cockpitAnchor = new Cesium.Cartesian3();
-    this.cockpitAnchorValid = false;
-    this.scratchCamera = new Cesium.Cartesian3();
-    this.scratchAdvance = new Cesium.Cartesian3();
-    this.scratchCorrection = new Cesium.Cartesian3();
-    this.scratchForward = new Cesium.Cartesian3();
-    this.scratchHorizontal = new Cesium.Cartesian3();
-    this.scratchUp = new Cesium.Cartesian3();
-    this.scratchLocal = new Cesium.Cartesian3();
-    this.scratchEnu = new Cesium.Matrix4();
-    this.scratchAnchorCartographic = new Cesium.Cartographic();
-    this.scratchCameraCartographic = new Cesium.Cartographic();
-    this.scratchTargetCartographic = new Cesium.Cartographic();
-    this._listenerRemovers = [];
-
-    // Camera mutations belong before scene update/culling. Changing the camera
-    // from preRender makes 3D Tiles discover a new view after traversal and can
-    // create a self-sustaining refinement loop under a moving cockpit camera.
-    this._listenerRemovers.push(
-      viewer.scene.preUpdate.addEventListener(() => this.update()),
-      viewer.trackedEntityChanged.addEventListener(() => {
-        if (this.active) this._adoptTrackedEntity(performance.now());
-        else this.syncEntry();
-      }),
-    );
-    this._listen(this.entry, 'click', () => this.enter());
-    this._listen(this.tr3bToggle, 'click', () => this.toggleTrackedTr3b());
-    this._listen(this.mapViewButton, 'click', () => this.exit());
-    this._listen(this.visionPrevious, 'click', () => this.cycleVisionMode(-1));
-    this._listen(this.visionCurrent, 'click', () => this.cycleVisionMode(1));
-    this._listen(this.visionNext, 'click', () => this.cycleVisionMode(1));
-    this._listen(this.contextPrevious, 'click', () => this.navigateContext(-1, { origin: 'user' }));
-    this._listen(this.contextNext, 'click', () => this.navigateContext(1, { origin: 'user' }));
-    this._listen(this.contextToggle, 'click', () => this.setContextCollapsed(!this.contextCollapsed));
-    this._listen(this.weatherToggle, 'click', () => {
-      const enabled = this.weatherToggle.getAttribute('aria-pressed') !== 'true';
-      this.syncWeatherToggle(enabled);
-      window.dispatchEvent(new CustomEvent('gev:cockpit-weather-toggle', {
-        detail: { enabled },
-      }));
-    });
-    this._listen(window, 'gev:cockpit-weather-state', (event) => {
-      this.syncWeatherToggle(event?.detail?.enabled !== false);
-    });
-    this._listen(this.signalToggle, 'click', () => this.setSignalCollapsed(
-      !this.signalCollapsed,
-      { user: true },
-    ));
-    this._listen(this.signalList, 'click', (event) => {
-      const target = event.target.closest('button[data-signal-layer][data-signal-id]');
-      if (!target) return;
-      event.preventDefault();
-      militaryAwarenessLayer.focusTarget?.(
-        target.dataset.signalLayer,
-        target.dataset.signalId,
-        { origin: 'user' },
-      );
-    });
-    this._listen(this.briefPrevious, 'click', () => this.showBriefPage(this.briefPageIndex - 1, { manual: true }));
-    this._listen(this.briefNext, 'click', () => this.showBriefPage(this.briefPageIndex + 1, { manual: true }));
-    this._listen(this.briefAutoToggle, 'click', () => {
-      this.setBriefAutoRotate(!this.briefAutoRotateEnabled);
-    });
-    this.briefTabs.forEach((button) => this._listen(button, 'click', () => {
-      this.showBriefPage(Number(button.dataset.cockpitBriefIndex), { manual: true });
-    }));
-    this._listen(document, 'visibilitychange', () => {
-      if (document.hidden) this.stopBriefRotation();
-      else if (this.briefAutoRotateEnabled) this.startBriefRotation();
-    });
-    this._listen(window, 'resize', () => this.scheduleContextLayout());
-    this._listen(document, 'keydown', (event) => this.onKeyDown(event), true);
-  }
-
-  _listen(target, type, handler, options) {
-    if (!target?.addEventListener) return;
-    target.addEventListener(type, handler, options);
-    this._listenerRemovers.push(() => target.removeEventListener(type, handler, options));
-  }
-
-  syncWeatherToggle(enabled) {
-    if (!this.weatherToggle) return;
-    const active = !!enabled;
-    this.weatherToggle.setAttribute('aria-pressed', String(active));
-    this.weatherToggle.setAttribute(
-      'aria-label',
-      `${active ? 'Disable' : 'Enable'} cockpit weather effects`,
-    );
-    this.weatherToggle.title = `${active ? 'Disable' : 'Enable'} cockpit weather effects`;
-    if (this.weatherState) this.weatherState.textContent = active ? 'ON' : 'OFF';
-  }
-
-  readAircraftInfo() {
-    // In cockpit mode the controller takes the entity off `viewer.trackedEntity`
-    // (see update()), so the cockpit's own handle is the tracked identity there.
-    const trackedEntity = this.viewer?.trackedEntity || this.trackedEntity;
-    return resolveTrackedAircraftInfo({
-      civilian: flightsLayer.getTrackedInfo?.() || null,
-      military: militaryFlightsLayer.getTrackedInfo?.() || null,
-      trackedId: trackedEntity?.gevTrackedId || '',
-    });
-  }
-
-  dispatchCockpitModeChanged(active, info = null) {
-    const subjectId = active
-      ? String(info?.icao24 || '').trim().toLowerCase() || null
-      : null;
-    const layerId = active && ['flights', 'military'].includes(info?.layerId)
-      ? info.layerId
-      : null;
-    window.dispatchEvent(new CustomEvent('gev:cockpit-mode-changed', {
-      detail: { active: active === true, subjectId, layerId },
-    }));
-  }
-
-  /**
-   * TR-3B Easter egg: flip the tracked contact between its real silhouette and
-   * the black triangle. The registry owns the session state; the owning layer
-   * re-derives what renders.
-   * @returns {boolean} True when a tracked contact was converted/restored.
-   */
-  toggleTrackedTr3b() {
-    const info = this.readAircraftInfo();
-    const icao24 = String(info?.icao24 || '').trim();
-    if (!icao24) return false;
-    toggleTr3b(icao24);
-    const layer = info.layerId === 'military' ? militaryFlightsLayer : flightsLayer;
-    layer.refreshTr3b?.(icao24);
-    this._tr3bSignature = null; // force the chip to repaint on the next sync
-    this.syncTr3bToggle(info);
-    return true;
-  }
-
-  /**
-   * Show the 🛸 chip whenever a contact is tracked (its own gate — converting
-   * does not depend on the cockpit entry policy) and mirror the conversion
-   * state. Change-only DOM writes: this runs on the preUpdate cadence.
-   * @param {object|null} info Tracked-aircraft descriptor, or null.
-   */
-  syncTr3bToggle(info) {
-    if (!this.tr3bToggle) return;
-    const icao24 = String(info?.icao24 || '').trim();
-    const converted = !!icao24 && isTr3b(icao24);
-    const signature = icao24 ? `${icao24}:${converted ? 1 : 0}` : '';
-    if (this._tr3bSignature === signature) return;
-    this._tr3bSignature = signature;
-    this.tr3bToggle.hidden = !icao24;
-    this.tr3bToggle.setAttribute('aria-pressed', converted ? 'true' : 'false');
-    this.tr3bToggle.title = converted ? 'Restore real aircraft' : 'Reclassify as TR-3B';
-  }
-
-  syncEntry() {
-    if (this.active) return;
-    const info = this.readAircraftInfo();
-    const trackedContact = !!(info && this.viewer.trackedEntity?.position);
-    this.syncTr3bToggle(trackedContact ? info : null);
-    const available = !!(this.isEntryAllowed() && trackedContact);
-    // Change-only DOM writes: this runs on a preUpdate cadence, and
-    // unconditional `hidden` assignments invalidate style/layout every frame
-    // even when nothing changed. (perf item 9)
-    if (this._entryAvailable === available) return;
-    this._entryAvailable = available;
-    if (this.entry) this.entry.hidden = !available;
-    if (this.mapViewButton) this.mapViewButton.hidden = true;
-    if (this.resetGlobeButton) this.resetGlobeButton.hidden = true;
-  }
-
-  /**
-   * Navigate Contacts through one Cockpit-owned funnel. A short grace window
-   * covers feed-refresh handoffs where the old source releases before the new
-   * source publishes its entity; trackedEntityChanged adopts synchronously as
-   * soon as the replacement exists, so the normal path does not wait.
-   */
-  navigateContext(direction, options = {}) {
-    const method = direction < 0 ? 'navigatePrevious' : 'navigateNext';
-    const wasActive = this.active;
-    if (wasActive) this.contextNavigationDeadlineMs = performance.now() + 1500;
-    const navigationOptions = wasActive ? { ...options, aircraftOnly: true } : options;
-    const changed = Boolean(militaryAwarenessLayer?.[method]?.(navigationOptions));
-    if (!changed) {
-      this.contextNavigationDeadlineMs = 0;
-      return false;
-    }
-    if (wasActive) this._adoptTrackedEntity(performance.now());
-    return true;
-  }
-
-  /** Adopt a newly selected aircraft without ever leaving Cockpit. */
-  _adoptTrackedEntity(nowMs, suppliedInfo = null) {
-    const nextEntity = this.viewer.trackedEntity;
-    if (!this.active || !nextEntity?.position || nextEntity === this.trackedEntity) return false;
-    const info = suppliedInfo || this.readAircraftInfo();
-    if (!info) return false;
-    if (this.trackedEntity && this.viewer.entities.contains(this.trackedEntity)) {
-      this.trackedEntity.show = this.trackedEntityWasShown;
-    }
-    this.trackedEntity = nextEntity;
-    this.trackedEntityWasShown = nextEntity.show;
-    nextEntity.show = false;
-    this.viewer.trackedEntity = undefined;
-    this.cockpitAnchorValid = false;
-    this.heading = normalizeHeading(info.track ?? 0);
-    this.lastFrameMs = nowMs;
-    this.lastHudUpdateMs = 0;
-    this.lastContextUpdateMs = 0;
-    this.lastCameraUpdateMs = 0;
-    this.contextNavigationDeadlineMs = 0;
-    this.dispatchCockpitModeChanged(true, info);
-    return true;
-  }
-
-  setVisionMode(mode, { revealParameters = false } = {}) {
-    const next = normalizeCockpitVisionMode(mode);
-    this.visionMode = next;
-    const inherited = String(this.getInheritedVisionLabel?.() || 'NORMAL').toUpperCase();
-    const labels = { optical: inherited, crt: 'CRT', nvg: 'NVG', thermal: 'FLIR', noir: 'NOIR' };
-    const names = { optical: inherited, crt: 'CRT', nvg: 'Night vision', thermal: 'Thermal', noir: 'Noir' };
-    if (this.visionCurrent) {
-      this.visionCurrent.dataset.cockpitVision = next;
-      this.visionCurrent.setAttribute('aria-label', `Current cockpit vision style: ${names[next]}. Activate for next style.`);
-      this.visionCurrent.title = `Current style: ${names[next]} — click for next`;
-    }
-    if (this.visionCurrentLabel) this.visionCurrentLabel.textContent = labels[next];
-    this.onVisionChange?.(next, this.active, { revealParameters });
-  }
-
-  cycleVisionMode(direction = 1) {
-    const modes = COCKPIT_VISION_MODES;
-    const currentIndex = Math.max(0, modes.indexOf(this.visionMode));
-    const step = direction < 0 ? -1 : 1;
-    const nextIndex = (currentIndex + step + modes.length) % modes.length;
-    this.setVisionMode(modes[nextIndex], { revealParameters: true });
-  }
-
-  clearPredictiveRoute() {
-    if (this.routeDirection) this.routeDirection.hidden = true;
-  }
-
-  onKeyDown(event) {
-    if (event.repeat || event.isComposing) return;
-    if (event.key === 'Escape' && this.active) {
-      // The credit lightbox owns Escape while its Close control or links hold
-      // focus. Its target handler closes the overlay and restores attribution
-      // focus; Cockpit must stay active behind it.
-      if (event.target?.closest?.('.cesium-credit-lightbox')) return;
-      if (document.getElementById('context-radio-dock')?.classList.contains('disclosure-open')) return;
-      if (document.querySelector('#cockpit-utility-controls [aria-expanded="true"]')) return;
-      if (this.context?.contains(event.target) && !this.contextCollapsed) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        this.setContextCollapsed(true);
-        if (event.target === this.contextToggle || this.contextToggle?.contains?.(event.target)) {
-          this.contextToggle?.blur?.();
-        } else {
-          this.contextToggle?.focus({ preventScroll: true });
-        }
-        return;
-      }
-      if (this.signalStream?.contains(event.target) && !this.signalCollapsed) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        this.setSignalCollapsed(true, { user: true });
-        if (event.target === this.signalToggle || this.signalToggle?.contains?.(event.target)) {
-          this.signalToggle?.blur?.();
-        } else {
-          this.signalToggle?.focus({ preventScroll: true });
-        }
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.exit();
-      return;
-    }
-    if (event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
-    const key = event.key?.toLowerCase();
-    if (key === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      if (!this.active) {
-        const cockpitAttempt = !!(this.readAircraftInfo() && this.viewer.trackedEntity?.position);
-        if (!cockpitAttempt) return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (!this.active && !this.isEntryAllowed()) return;
-      const changed = this.active ? this.exit() : this.enter();
-      return;
-    }
-  }
-
-  enter() {
-    if (this.active) return false;
-    if (!this.isEntryAllowed()) return false;
-    const info = this.readAircraftInfo();
-    const entity = this.viewer.trackedEntity;
-    if (!info || !entity?.position) return false;
-    this.entryFocusOrigin = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    // Retire deferred navigation before cancelFlight can run its callbacks.
-    this.onCameraTakeover?.();
-    this.viewer.camera.cancelFlight();
-    this.trackedEntity = entity;
-    this.trackedEntityWasShown = entity.show;
-    entity.show = false;
-    this.heading = normalizeHeading(info.track ?? 0);
-    this.lastFrameMs = performance.now();
-    this.lastCameraUpdateMs = 0;
-    this.lastHudUpdateMs = 0;
-    this.lastContextUpdateMs = 0;
-    this.contextNavigationDeadlineMs = 0;
-    this.lastGroundProbeMs = 0;
-    this.surfaceWaitStartedMs = performance.now();
-    this.surfaceAcquiring = false;
-    this.surfaceFallback = false;
-    this.lastCompassSignature = '';
-    this.cockpitAnchorValid = false;
-    this.lastCameraUpdateMs = 0;
-    this.active = true;
-    // Cockpit animates the camera from preUpdate every frame — preUpdate only
-    // runs on rendered frames, so idle mode would freeze the cockpit solid.
-    // (perf wave 2)
-    holdContinuousRender('cockpit');
-    this.viewer.trackedEntity = undefined;
-    this.viewer.scene.screenSpaceCameraController.enableInputs = false;
-    document.body.classList.add('cockpit-mode');
-    // Activation writes entry/quick/map visibility directly, bypassing
-    // syncEntry's change-only cache — invalidate it so the exit-path
-    // syncEntry re-applies every write (notably re-hiding mapViewButton).
-    this._entryAvailable = undefined;
-    if (this.entry) this.entry.hidden = true;
-    if (this.tr3bToggle) {
-      this.tr3bToggle.hidden = true;
-      this._tr3bSignature = null;
-    }
-    if (this.mapViewButton) this.mapViewButton.hidden = false;
-    if (this.resetGlobeButton) this.resetGlobeButton.hidden = false;
-    if (this.hud) this.hud.hidden = false;
-    if (this.signalStream) this.signalStream.hidden = false;
-    this.hud?.classList.add('signals-active');
-    this.signalItems = [];
-    this.signalSignatures.clear();
-    this.showBriefPage(0);
-    this.startBriefRotation();
-    const trackLabel = info.callsign || info.registration || info.icao24 || 'AIRCRAFT';
-    const trackHeading = String(Math.round(normalizeHeading(info.track ?? 0))).padStart(3, '0');
-    this.pushCockpitSignal(
-      'track',
-      'track',
-      'TRACK ACQUIRED',
-      `${trackLabel} · COURSE ${trackHeading}°`,
-    );
-    this.updateHud(info, performance.now(), true);
-    this.setVisionMode(this.visionMode);
-    this.scheduleContextLayout();
-    this.mapViewButton?.focus({ preventScroll: true });
-    this.onEntered?.();
-    this.dispatchCockpitModeChanged(true, info);
-    return true;
-  }
-
-  exit({ restoreTracking = true } = {}) {
-    if (!this.active) return false;
-    const entity = this.trackedEntity;
-    this.active = false;
-    releaseContinuousRender('cockpit');
-    this.trackedEntity = null;
-    this.heading = null;
-    this.cockpitAnchorValid = false;
-    this.surfaceWaitStartedMs = 0;
-    this.surfaceAcquiring = false;
-    this.surfaceFallback = false;
-    this.lastHudUpdateMs = 0;
-    this.lastContextUpdateMs = 0;
-    this.contextNavigationDeadlineMs = 0;
-    this.lastCompassSignature = '';
-    this.stopBriefRotation();
-    this.regionalBriefAbort?.abort();
-    this.regionalBriefAbort = null;
-    this.regionalBriefRequestToken += 1;
-    this.regionalBriefSubjectId = null;
-    document.body.classList.remove('cockpit-mode');
-    this.onExited?.();
-    this.hud?.style.removeProperty('--cockpit-utility-top');
-    this.hud?.style.removeProperty('--cockpit-utility-max-height');
-    if (this.hud) this.hud.hidden = true;
-    if (this.route) this.route.hidden = true;
-    this.clearPredictiveRoute();
-    this.setVisionMode('optical');
-    if (this.signalStream) this.signalStream.hidden = true;
-    this.hud?.classList.remove('signals-active');
-    this.viewer.scene.screenSpaceCameraController.enableInputs = true;
-    if (entity && this.viewer.entities.contains(entity)) entity.show = this.trackedEntityWasShown;
-    this.trackedEntityWasShown = true;
-    this.dispatchCockpitModeChanged(false);
-    if (restoreTracking && entity && this.viewer.entities.contains(entity)) {
-      this.viewer.trackedEntity = entity;
-      this.restoreTrackingFrame(entity);
-    }
-    this.syncEntry();
-    const restoreTarget = this.entryFocusOrigin === this.entry
-      ? this.entry
-      : (this.entry || this.entryFocusOrigin);
-    this.entryFocusOrigin = null;
-    if (restoreTarget?.isConnected && !restoreTarget.hidden) {
-      restoreTarget.focus({ preventScroll: true });
-    }
-    return true;
-  }
-
-  update() {
-    if (!this.active) {
-      // Entry availability changes on a human timescale (tracking start/stop,
-      // info arriving after a poll) — polling it every rendered frame ran
-      // readAircraftInfo() + DOM pokes at display rate in plain map mode.
-      // 250 ms keeps the chip imperceptibly fresh; trackedEntityChanged still
-      // fires syncEntry immediately on the events that matter. (perf item 9)
-      const nowMs = performance.now();
-      if (nowMs - (this._lastEntrySyncMs || 0) >= 250) {
-        this._lastEntrySyncMs = nowMs;
-        this.syncEntry();
-      }
-      return;
-    }
-
-    const nowMs = performance.now();
-    const info = this.readAircraftInfo();
-
-    // Adopt a newly selected track before the camera cadence gate. A context
-    // NEXT/PREV selection can otherwise spend one frame driving the old
-    // aircraft with the new aircraft's metadata.
-    this._adoptTrackedEntity(nowMs, info);
-    if (!info || !this.trackedEntity || !this.viewer.entities.contains(this.trackedEntity)) {
-      if (nowMs < this.contextNavigationDeadlineMs) return;
-      this.exit({ restoreTracking: false });
-      return;
-    }
-    if (!cockpitUiUpdateDue(nowMs, this.lastCameraUpdateMs, COCKPIT_CAMERA_UPDATE_MS)) return;
-    this.lastCameraUpdateMs = nowMs;
-
-    const target = this.trackedEntity.position.getValue(this.viewer.clock.currentTime, this.scratchTarget);
-    if (!target) return;
-    const dtSec = Math.min(0.1, Math.max(0, (nowMs - this.lastFrameMs) / 1000));
-    this.lastFrameMs = nowMs;
-    if (Number.isFinite(info.track)) {
-      this.heading = slewHeading(
-        this.heading ?? info.track, info.track, COCKPIT_HEADING_SLEW_DPS * dtSec,
-      );
-    }
-
-    if (!this.cockpitAnchorValid) {
-      Cesium.Cartesian3.clone(target, this.cockpitAnchor);
-      this.cockpitAnchorValid = true;
-    }
-
-    // First-person motion cannot use the delayed feed correction as a raw
-    // camera destination: a harmless icon re-anchor becomes a whole-world
-    // surge/reversal in cockpit view. Advance the camera anchor inertially
-    // from the reported course/speed and converge on the authoritative layer
-    // display position at a bounded rate. This preserves the layer's required
-    // 15/30-second interpolation and per-frame cache without exposing its
-    // sample-boundary corrections to the camera.
-    const headingRad = Cesium.Math.toRadians(this.heading ?? 0);
-    const pitchRad = Cesium.Math.toRadians(COCKPIT_VIEW_PITCH_DEG);
-    const speedMps = Number.isFinite(info.velocityMps) ? Math.max(0, info.velocityMps) : 0;
-
-    if (info.stale) {
-      // A feed backoff has no authoritative velocity epoch to advance from.
-      // Hold the cockpit on the exact layer-rendered position so the camera
-      // cannot coast away while the icon correctly remains fixed.
-      Cesium.Cartesian3.clone(target, this.cockpitAnchor);
-    } else {
-      Cesium.Transforms.eastNorthUpToFixedFrame(
-        this.cockpitAnchor, Cesium.Ellipsoid.WGS84, this.scratchEnu,
-      );
-      this.scratchLocal.x = Math.sin(headingRad);
-      this.scratchLocal.y = Math.cos(headingRad);
-      this.scratchLocal.z = 0;
-      Cesium.Matrix4.multiplyByPointAsVector(this.scratchEnu, this.scratchLocal, this.scratchHorizontal);
-      Cesium.Cartesian3.normalize(this.scratchHorizontal, this.scratchHorizontal);
-      Cesium.Cartesian3.multiplyByScalar(
-        this.scratchHorizontal, speedMps * dtSec, this.scratchAdvance,
-      );
-      Cesium.Cartesian3.add(this.cockpitAnchor, this.scratchAdvance, this.cockpitAnchor);
-      Cesium.Cartesian3.subtract(target, this.cockpitAnchor, this.scratchCorrection);
-      const correctionDistanceM = Cesium.Cartesian3.magnitude(this.scratchCorrection);
-      const correctionStepM = cockpitAnchorCorrectionStep(correctionDistanceM, speedMps, dtSec);
-      if (correctionStepM > 0 && correctionDistanceM > 0) {
-        Cesium.Cartesian3.multiplyByScalar(
-          this.scratchCorrection, correctionStepM / correctionDistanceM, this.scratchCorrection,
-        );
-        Cesium.Cartesian3.add(this.cockpitAnchor, this.scratchCorrection, this.cockpitAnchor);
-      }
-    }
-
-    // The inertial anchor is independent of the layer's render-floor clamp and
-    // can otherwise coast into a photoreal mesh while a landing contact is
-    // between fixes. Clamp it against the same mesh-first shared floor used by
-    // aircraft rendering. For a slow contact whose floor cell is still cold,
-    // its already-clamped render position is a conservative temporary floor.
-    const anchorCartographic = Cesium.Cartographic.fromCartesian(
-      this.cockpitAnchor, Cesium.Ellipsoid.WGS84, this.scratchAnchorCartographic,
-    );
-    const targetCartographic = Cesium.Cartographic.fromCartesian(
-      target, Cesium.Ellipsoid.WGS84, this.scratchTargetCartographic,
-    );
-    let cockpitFloorM = cachedGroundFloor(info.latitude, info.longitude);
-    if (info.onGround === true) {
-      const groundPoint = [{ lat: info.latitude, lon: info.longitude }];
-      warmGroundFloor(groundPoint);
-      const meshFloorM = cachedMeshFloor(info.latitude, info.longitude);
-      if (meshFloorPreferred() && !Number.isFinite(meshFloorM)) {
-        if (cockpitUiUpdateDue(nowMs, this.lastGroundProbeMs, COCKPIT_GROUND_PROBE_MS)) {
-          this.lastGroundProbeMs = nowMs;
-          const viewerCartographic = this.viewer.camera.positionCartographic;
-          sampleMeshFloorCells(this.viewer.scene, groundPoint, {
-            excludeObjects: [this.trackedEntity],
-            viewerLat: Cesium.Math.toDegrees(viewerCartographic.latitude),
-            viewerLon: Cesium.Math.toDegrees(viewerCartographic.longitude),
-          });
-        }
-        cockpitFloorM = cachedMeshFloor(info.latitude, info.longitude);
-        if (!Number.isFinite(cockpitFloorM)) {
-          if (!this.surfaceWaitStartedMs) this.surfaceWaitStartedMs = nowMs;
-          if (!cockpitSurfaceWaitExpired(nowMs, this.surfaceWaitStartedMs, COCKPIT_GROUND_WAIT_TIMEOUT_MS)) {
-            // Keep the already-safe map camera in place while the photoreal
-            // surface under a parked aircraft is acquired. The bounded wait
-            // prevents a permanently cold mesh cell from freezing cockpit.
-            this.surfaceAcquiring = true;
-            this.surfaceFallback = false;
-            if (cockpitUiUpdateDue(nowMs, this.lastHudUpdateMs, COCKPIT_HUD_UPDATE_MS)) {
-              this.lastHudUpdateMs = nowMs;
-              this.updateHud(info, nowMs);
-            }
-            return;
-          }
-          this.surfaceAcquiring = false;
-          this.surfaceFallback = true;
-        } else {
-          this.surfaceWaitStartedMs = 0;
-          this.surfaceAcquiring = false;
-          this.surfaceFallback = false;
-        }
-      }
-    } else {
-      this.surfaceWaitStartedMs = 0;
-      this.surfaceAcquiring = false;
-      this.surfaceFallback = false;
-    }
-    if (!Number.isFinite(cockpitFloorM)
-        && speedMps < 90
-        && Number.isFinite(targetCartographic?.height)) {
-      cockpitFloorM = targetCartographic.height - GROUND_FLOOR_LIFT_M;
-    }
-    if (anchorCartographic && Number.isFinite(cockpitFloorM)) {
-      const minimumAnchorHeightM = cockpitGroundSafeHeight(
-        anchorCartographic.height,
-        cockpitFloorM,
-        COCKPIT_MIN_GROUND_CLEARANCE_M - COCKPIT_UP_OFFSET_M,
-      );
-      if (minimumAnchorHeightM !== anchorCartographic.height) {
-        anchorCartographic.height = minimumAnchorHeightM;
-        Cesium.Ellipsoid.WGS84.cartographicToCartesian(anchorCartographic, this.cockpitAnchor);
-      }
-    }
-
-    // Rebuild the local frame at the stabilized anchor after advancing it.
-    Cesium.Transforms.eastNorthUpToFixedFrame(
-      this.cockpitAnchor, Cesium.Ellipsoid.WGS84, this.scratchEnu,
-    );
-    this.scratchLocal.x = Math.sin(headingRad);
-    this.scratchLocal.y = Math.cos(headingRad);
-    this.scratchLocal.z = 0;
-    Cesium.Matrix4.multiplyByPointAsVector(this.scratchEnu, this.scratchLocal, this.scratchHorizontal);
-    Cesium.Cartesian3.normalize(this.scratchHorizontal, this.scratchHorizontal);
-
-    this.scratchLocal.x = Math.sin(headingRad) * Math.cos(pitchRad);
-    this.scratchLocal.y = Math.cos(headingRad) * Math.cos(pitchRad);
-    this.scratchLocal.z = Math.sin(pitchRad);
-    Cesium.Matrix4.multiplyByPointAsVector(this.scratchEnu, this.scratchLocal, this.scratchForward);
-    Cesium.Cartesian3.normalize(this.scratchForward, this.scratchForward);
-
-    this.scratchLocal.x = -Math.sin(headingRad) * Math.sin(pitchRad);
-    this.scratchLocal.y = -Math.cos(headingRad) * Math.sin(pitchRad);
-    this.scratchLocal.z = Math.cos(pitchRad);
-    Cesium.Matrix4.multiplyByPointAsVector(this.scratchEnu, this.scratchLocal, this.scratchUp);
-    Cesium.Cartesian3.normalize(this.scratchUp, this.scratchUp);
-
-    Cesium.Cartesian3.multiplyByScalar(
-      this.scratchHorizontal, COCKPIT_FORWARD_OFFSET_M, this.scratchCamera,
-    );
-    Cesium.Cartesian3.add(this.cockpitAnchor, this.scratchCamera, this.scratchCamera);
-    Cesium.Matrix4.getTranslation(this.scratchEnu, this.scratchTarget);
-    Cesium.Cartesian3.normalize(this.scratchTarget, this.scratchTarget);
-    Cesium.Cartesian3.multiplyByScalar(this.scratchTarget, COCKPIT_UP_OFFSET_M, this.scratchTarget);
-    Cesium.Cartesian3.add(this.scratchCamera, this.scratchTarget, this.scratchCamera);
-
-    // Recheck at the final forward-offset camera coordinate because a taxiing
-    // aircraft can cross into an adjacent coarse floor cell between updates.
-    const cameraCartographic = Cesium.Cartographic.fromCartesian(
-      this.scratchCamera, Cesium.Ellipsoid.WGS84, this.scratchCameraCartographic,
-    );
-    if (cameraCartographic) {
-      const cameraLat = Cesium.Math.toDegrees(cameraCartographic.latitude);
-      const cameraLon = Cesium.Math.toDegrees(cameraCartographic.longitude);
-      const cameraFloorM = cachedGroundFloor(cameraLat, cameraLon);
-      if (Number.isFinite(cameraFloorM)) {
-        cockpitFloorM = Math.max(cockpitFloorM ?? Number.NEGATIVE_INFINITY, cameraFloorM);
-      }
-      const safeHeightM = cockpitGroundSafeHeight(
-        cameraCartographic.height,
-        cockpitFloorM,
-        COCKPIT_MIN_GROUND_CLEARANCE_M,
-      );
-      if (safeHeightM !== cameraCartographic.height) {
-        cameraCartographic.height = safeHeightM;
-        Cesium.Ellipsoid.WGS84.cartographicToCartesian(cameraCartographic, this.scratchCamera);
-      }
-    }
-
-    this.viewer.camera.setView({
-      destination: this.scratchCamera,
-      orientation: { direction: this.scratchForward, up: this.scratchUp },
-    });
-    if (cockpitUiUpdateDue(nowMs, this.lastHudUpdateMs, COCKPIT_HUD_UPDATE_MS)) {
-      this.lastHudUpdateMs = nowMs;
-      this.updateHud(info, nowMs);
-    }
-  }
-
-  updateHud(info, nowMs = performance.now(), forceContext = false) {
-    this.lastAircraftInfo = info;
-    const heading = normalizeHeading(this.heading ?? info.track ?? 0);
-    if (this.callsign) {
-      this.callsign.textContent = info.callsign || info.registration || info.icao24 || 'AIRCRAFT';
-    }
-    const speedKt = Number.isFinite(info.velocityMps) ? info.velocityMps * 1.94384 : null;
-    setCockpitRollingValue(
-      this.speed,
-      formatSpeedRulerTick(speedKt),
-      speedKt,
-      { immediate: forceContext },
-    );
-    if (this.speedRim) this.speedRim.classList.toggle('unavailable', speedKt === null);
-    if (this.speedRimValue) this.speedRimValue.textContent = formatSpeedRulerTick(speedKt);
-    const speedTicks = speedRulerTicks(speedKt, this.speedRimTicks.length);
-    this.speedRimTicks.forEach((element, index) => {
-      const tick = speedTicks[index];
-      element.hidden = !tick;
-      if (!tick) return;
-      element.style.setProperty('--slot', tick.slot.toFixed(4));
-      element.style.setProperty('--depth', tick.depth.toFixed(4));
-      element.style.setProperty('--curve', altitudeRulerCurveInset(tick.slot).toFixed(5));
-      element.classList.toggle('major', tick.major);
-      const label = element.querySelector('b');
-      if (label) label.textContent = formatSpeedRulerTick(tick.valueKt);
-    });
-    const altitudeFt = cockpitAltitudeDisplayFt(info.altitudeM, info.onGround);
-    if (this.altitude) {
-      const displayedAltitudeFt = Number.isFinite(altitudeFt)
-        ? Math.round(altitudeFt)
-        : null;
-      setCockpitRollingValue(
-        this.altitude,
-        displayedAltitudeFt !== null
-          ? displayedAltitudeFt.toLocaleString('en-US')
-          : '-----',
-        displayedAltitudeFt,
-        { immediate: forceContext },
-      );
-    }
-    if (this.altitudeRim) this.altitudeRim.classList.toggle('unavailable', altitudeFt === null);
-    if (this.altitudeRimValue) {
-      this.altitudeRimValue.textContent = formatAltitudeRulerTick(altitudeFt);
-    }
-    const altitudeTicks = altitudeRulerTicks(altitudeFt, this.altitudeRimTicks.length);
-    this.altitudeRimTicks.forEach((element, index) => {
-      const tick = altitudeTicks[index];
-      element.hidden = !tick;
-      if (!tick) return;
-      element.style.setProperty('--slot', tick.slot.toFixed(4));
-      element.style.setProperty('--depth', tick.depth.toFixed(4));
-      element.style.setProperty('--curve', altitudeRulerCurveInset(tick.slot).toFixed(5));
-      element.classList.toggle('major', tick.major);
-      const label = element.querySelector('b');
-      if (label) label.textContent = formatAltitudeRulerTick(tick.valueFt);
-    });
-    setCockpitRollingValue(
-      this.headingValue,
-      String(Math.round(heading) % 360).padStart(3, '0'),
-      heading,
-      { circularRange: 360, immediate: forceContext },
-    );
-    if (this.compassTape) {
-      const divisions = compassDivisions(heading);
-      const signature = divisions.join(',');
-      if (signature !== this.lastCompassSignature) {
-        this.lastCompassSignature = signature;
-        this.compassTape.innerHTML = divisions
-          .map((division, index) => {
-            const slot = index - 3;
-            return `<span class="${slot === 0 ? 'active' : ''}" style="--slot:${slot};--depth:${Math.abs(slot)}">${formatCompassDivision(division)}</span>`;
-          })
-          .join('');
-      }
-    }
-    if (this.clock) this.clock.textContent = new Date().toISOString().slice(11, 19) + 'Z';
-    if (this.position) {
-      const lat = Number.isFinite(info.latitude)
-        ? `${Math.abs(info.latitude).toFixed(3)}°${info.latitude >= 0 ? 'N' : 'S'}` : '--';
-      const lon = Number.isFinite(info.longitude)
-        ? `${Math.abs(info.longitude).toFixed(3)}°${info.longitude >= 0 ? 'E' : 'W'}` : '--';
-      this.position.textContent = `${lat} · ${lon}`;
-    }
-    if (this.aircraftMeta) {
-      const feedState = this.surfaceAcquiring
-        ? 'ACQUIRING SURFACE'
-        : (this.surfaceFallback ? 'SURFACE FALLBACK' : (info.stale ? 'STALE FEED' : 'LIVE TRACK'));
-      this.aircraftMeta.textContent = `${info.layerId === 'military' ? 'MILITARY' : 'COMMERCIAL'} · ${feedState} · COURSE ALIGNED`;
-    }
-    this.updateRoute(info);
-    if (forceContext
-      || cockpitUiUpdateDue(nowMs, this.lastContextUpdateMs, COCKPIT_CONTEXT_UPDATE_MS)) {
-      this.lastContextUpdateMs = nowMs;
-      this.updateLocalPosition(info);
-      this.maybeRefreshRegionalBrief(info);
-      this.updateContext(info, heading);
-    }
-    if (this.hud) this.hud.dataset.layer = info.layerId || 'flights';
-  }
-
-  updateRoute(info) {
-    const origin = info?.route?.origin;
-    const destination = info?.route?.destination;
-    const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
-    const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || 'UNKNOWN';
-    if (this.routeFrom) this.routeFrom.textContent = routeLabel(origin);
-    if (this.routeTo) this.routeTo.textContent = routeLabel(destination);
-    if (this.routeStatus) {
-      this.routeStatus.textContent = validDestination
-        ? 'ARROW · ESTIMATED DIRECTION'
-        : 'ROUTE DATA UNAVAILABLE';
-    }
-    if (this.route) this.route.hidden = !origin && !destination;
-    if (!validDestination || !Number.isFinite(info?.longitude) || !Number.isFinite(info?.latitude)) {
-      this.clearPredictiveRoute();
-      return;
-    }
-    const destinationBearing = bearingBetweenCoordinates(
-      info.latitude,
-      info.longitude,
-      destination.lat,
-      destination.lon,
-    );
-    const relative = relativeBearing(destinationBearing, this.heading ?? info.track ?? 0);
-    if (!Number.isFinite(destinationBearing) || !Number.isFinite(relative)) {
-      this.clearPredictiveRoute();
-      return;
-    }
-    if (this.routeDirection) {
-      const displayedRelative = Math.max(-120, Math.min(120, relative));
-      this.routeDirection.hidden = false;
-      this.routeDirection.style.setProperty('--route-angle', `${displayedRelative.toFixed(2)}deg`);
-    }
-    if (this.routeDirectionLabel) {
-      this.routeDirectionLabel.textContent = `DEST ${String(Math.round(destinationBearing)).padStart(3, '0')}°`;
-    }
-  }
-
-  updateContext(info, heading) {
-    if (!this.context) return;
-    const snapshot = militaryAwarenessLayer.getContextSnapshot?.() || null;
-    const trackedId = info.icao24 || info.id;
-    const readout = resolveCockpitContextReadout({ snapshot, info });
-    if (!readout.visible) {
-      this.context.hidden = true;
-      this.hud?.classList.remove('context-active');
-      this.contextLayoutStamp = null;
-      this.pushCockpitSignal(
-        'context-status',
-        'info',
-        'CONTEXT STANDBY',
-        'ENABLE GLOBAL CONTEXT FOR PROXIMITY PINGS',
-      );
-      return;
-    }
-
-    this.context.hidden = false;
-    this.hud?.classList.add('context-active');
-    if (this.contextSubject) {
-      const installationCoverage = snapshot.cohorts
-        .find((cohort) => cohort.id === 'military-installations')?.coverage;
-      this.contextSubject.textContent = formatCockpitContextScope(
-        snapshot.subject.label || trackedId,
-        snapshot.radiusM,
-        installationCoverage,
-      );
-    }
-    // Navigation stays wired in every state — the operator must always be able
-    // to step off the current contact from the panel that hosts the controls.
-    if (this.contextPrevious) this.contextPrevious.disabled = !snapshot.navigation?.canPrevious;
-    if (this.contextNext) this.contextNext.disabled = !snapshot.navigation?.canNext;
-
-    if (readout.contactLost) {
-      // The subject left its source. Every number below is measured against a
-      // position that stopped updating, so hold the last rendered readout and
-      // say so instead of re-deriving stale geometry as if it were live.
-      const enteringLost = this.context.dataset.state !== 'lost';
-      this.context.dataset.state = 'lost';
-      if (this.contextUncertainty) {
-        this.contextUncertainty.textContent = 'CONTACT LOST · LAST KNOWN READOUT · NOT AN ALL-CLEAR';
-      }
-      // The cue changes the footer's height; re-run layout once on the way in
-      // rather than every frame the contact stays lost.
-      if (enteringLost) this.scheduleContextLayout();
-      this.pushCockpitSignal(
-        'context-status',
-        'warning',
-        `CONTACT LOST · ${snapshot.subject.label || snapshot.subject.id || 'SUBJECT'}`,
-        'SUBJECT LEFT ITS FEED · READOUT HOLDING LAST KNOWN',
-      );
-      return;
-    }
-
-    let unknownCount = 0;
-    const nearest = [];
-    for (const cohort of snapshot.cohorts) {
-      const element = this.contextCohorts.get(cohort.id);
-      const value = element?.querySelector('strong');
-      if (value) value.textContent = cohort.count === null ? '?' : String(cohort.count);
-      element?.classList.toggle('unknown', cohort.relationship === 'UNKNOWN');
-      if (cohort.count === null) unknownCount += 1;
-      for (const item of cohort.nearest) nearest.push({ ...item, cohort });
-    }
-    nearest.sort((a, b) => (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity));
-    const closest = nearest[0] || null;
-    const closestLabel = formatAwarenessLabel(closest);
-    if (this.contextNearestLabel) {
-      this.contextNearestLabel.textContent = closest
-        ? `${closest.cohort.label.toUpperCase()} · ${closestLabel}` : 'NO AVAILABLE EXAMPLE';
-      this.contextNearestLabel.setAttribute(
-        'aria-label',
-        closest && closestLabel === '—'
-          ? `${closest.cohort.label}, Unavailable`
-          : this.contextNearestLabel.textContent,
-      );
-    }
-    if (this.contextDistance) {
-      const distanceM = closest?.distanceM;
-      this.contextDistance.textContent = Number.isFinite(distanceM)
-        ? `${distanceM < 10000 ? (distanceM / 1000).toFixed(1) : Math.round(distanceM / 1000)} KM` : '—';
-      this.contextDistance.setAttribute(
-        'aria-label',
-        Number.isFinite(distanceM) ? this.contextDistance.textContent : 'Unavailable',
-      );
-    }
-
-    // The arrow and BRG are nose-relative to the tracked aircraft. When the
-    // subject is a vessel, an installation, or another aircraft, the rest of
-    // this row is measured from that subject — so the aircraft-frame half is
-    // dashed rather than presented alongside subject-frame distances as if the
-    // two shared an origin.
-    let relative = null;
-    if (readout.aircraftRelative
-      && closest?.position && Number.isFinite(info.latitude) && Number.isFinite(info.longitude)) {
-      const cartographic = Cesium.Cartographic.fromCartesian(closest.position);
-      const bearing = cartographic ? bearingBetweenCoordinates(
-        info.latitude,
-        info.longitude,
-        Cesium.Math.toDegrees(cartographic.latitude),
-        Cesium.Math.toDegrees(cartographic.longitude),
-      ) : null;
-      relative = relativeBearing(bearing, heading);
-    }
-    if (this.contextDirection) {
-      this.contextDirection.style.transform = `rotate(${relative ?? 0}deg)`;
-      this.contextDirection.classList.toggle('unknown', relative === null);
-    }
-    if (this.contextBearing) {
-      if (relative === null) this.contextBearing.textContent = 'BRG —';
-      else if (Math.abs(relative) < 8) this.contextBearing.textContent = 'AHEAD';
-      else this.contextBearing.textContent = `${relative < 0 ? 'L' : 'R'} ${String(Math.round(Math.abs(relative))).padStart(3, '0')}°`;
-    }
-    if (this.contextUncertainty) {
-      this.contextUncertainty.textContent = unknownCount
-        ? `${unknownCount} INPUT${unknownCount === 1 ? '' : 'S'} UNKNOWN · NOT AN ALL-CLEAR`
-        : 'AVAILABLE INPUTS CURRENT · NOT AN ALL-CLEAR';
-    }
-    if (this.contextUpdated) {
-      this.contextUpdated.textContent = Number.isFinite(snapshot.evaluatedAt)
-        ? new Date(snapshot.evaluatedAt).toISOString().slice(11, 19) + 'Z' : '--:--:--Z';
-    }
-    this.context.dataset.state = unknownCount ? 'uncertain' : 'current';
-    this.updateCockpitSignals(snapshot, unknownCount);
-    if (this.contextLayoutStamp !== snapshot.evaluatedAt) {
-      this.contextLayoutStamp = snapshot.evaluatedAt;
-      this.scheduleContextLayout();
-    }
-  }
-
-  scheduleContextLayout() {
-    const contextVisible = this.context && !this.context.hidden;
-    const signalVisible = this.signalStream && !this.signalStream.hidden;
-    if ((!contextVisible && !signalVisible) || this.contextLayoutFrame !== null) return;
-    this.contextLayoutFrame = requestAnimationFrame(() => {
-      this.contextLayoutFrame = null;
-      this.syncContextLayout();
-      this.syncSignalLayout();
-    });
-  }
-
-  showBriefPage(index, { manual = false } = {}) {
-    const count = COCKPIT_BRIEF_PAGES.length;
-    this.briefPageIndex = ((Number(index) % count) + count) % count;
-    const page = COCKPIT_BRIEF_PAGES[this.briefPageIndex];
-    this.briefPages.forEach((element) => {
-      element.hidden = element.dataset.cockpitBriefPage !== page.id;
-    });
-    this.briefTabs.forEach((button) => {
-      const current = Number(button.dataset.cockpitBriefIndex) === this.briefPageIndex;
-      button.setAttribute('aria-current', current ? 'true' : 'false');
-    });
-    if (this.briefKicker) {
-      const indicator = this.briefKicker.querySelector('i');
-      this.briefKicker.replaceChildren(...[indicator, document.createTextNode(` ${page.kicker}`)].filter(Boolean));
-    }
-    if (this.briefSubtitle) this.briefSubtitle.textContent = page.subtitle;
-    if (this.briefPosition) this.briefPosition.textContent = `${this.briefPageIndex + 1} / ${count}`;
-    if (this.briefSource) this.briefSource.textContent = page.source;
-    if (this.signalStream) this.signalStream.dataset.briefPage = page.id;
-    if (manual && this.briefAutoRotateEnabled) this.startBriefRotation({ reset: true });
-    this.scheduleContextLayout();
-  }
-
-  setBriefAutoRotate(enabled) {
-    this.briefAutoRotateEnabled = Boolean(enabled);
-    if (this.briefAutoToggle) {
-      this.briefAutoToggle.setAttribute('aria-pressed', String(this.briefAutoRotateEnabled));
-      const label = this.briefAutoRotateEnabled ? 'CYCLE ON' : 'CYCLE OFF';
-      this.briefAutoToggle.textContent = label;
-      const help = this.briefAutoRotateEnabled
-        ? COCKPIT_BRIEF_CYCLE_ON_HELP
-        : COCKPIT_BRIEF_CYCLE_OFF_HELP;
-      this.briefAutoToggle.setAttribute('aria-label', label);
-      this.briefAutoToggle.title = help;
-    }
-    if (this.briefAutoRotateEnabled) this.startBriefRotation({ reset: true });
-    else this.stopBriefRotation();
-  }
-
-  startBriefRotation({ reset = false } = {}) {
-    if (reset) this.stopBriefRotation();
-    if (!this.briefAutoRotateEnabled
-      || this.briefTimer
-      || !this.active
-      || this.signalCollapsed
-      || document.hidden) return;
-    this.briefTimer = window.setTimeout(() => {
-      this.briefTimer = null;
-      const hasPointer = this.signalStream?.matches(':hover') === true;
-      const hasFocus = this.signalStream?.contains(document.activeElement) === true;
-      const isInteracting = hasPointer || hasFocus;
-      if (!isInteracting) {
-        this.showBriefPage(this.briefPageIndex + 1);
-      }
-      this.startBriefRotation();
-    }, COCKPIT_BRIEF_ROTATE_MS);
-  }
-
-  stopBriefRotation() {
-    if (this.briefTimer) window.clearTimeout(this.briefTimer);
-    this.briefTimer = null;
-  }
-
-  updateLocalPosition(info) {
-    if (!this.localCoordinates) return;
-    if (!Number.isFinite(info.latitude) || !Number.isFinite(info.longitude)) {
-      this.localCoordinates.textContent = 'POSITION UNAVAILABLE';
-      return;
-    }
-    const lat = `${Math.abs(info.latitude).toFixed(3)}°${info.latitude >= 0 ? 'N' : 'S'}`;
-    const lon = `${Math.abs(info.longitude).toFixed(3)}°${info.longitude >= 0 ? 'E' : 'W'}`;
-    this.localCoordinates.textContent = `${lat} · ${lon}`;
-  }
-
-  maybeRefreshRegionalBrief(info) {
-    if (!this.active || !Number.isFinite(info.latitude) || !Number.isFinite(info.longitude)) return;
-    const subjectId = `${info.layerId || 'aircraft'}:${info.icao24 || info.registration || info.callsign || 'unknown'}`;
-    if (subjectId !== this.regionalBriefSubjectId) {
-      this.regionalBriefAbort?.abort();
-      this.regionalBriefAbort = null;
-      this.regionalBriefRequestToken += 1;
-      this.regionalBriefSubjectId = subjectId;
-      this.regionalBrief = null;
-      this.regionalBriefAnchor = null;
-      this.regionalBriefFetchedAt = 0;
-    }
-    const point = { latitude: info.latitude, longitude: info.longitude };
-    const ageMs = Date.now() - this.regionalBriefFetchedAt;
-    const distanceM = regionalDistanceM(this.regionalBriefAnchor, point);
-    if (this.regionalBriefAbort || (ageMs < COCKPIT_REGIONAL_REFRESH_MS
-      && distanceM < COCKPIT_REGIONAL_REFRESH_DISTANCE_M)) return;
-
-    this.regionalBriefAnchor = point;
-    this.regionalBriefFetchedAt = Date.now();
-    const controller = new AbortController();
-    const requestToken = ++this.regionalBriefRequestToken;
-    this.regionalBriefAbort = controller;
-    if (!this.regionalBrief) this.renderRegionalBriefStatus('loading', info);
-    fetchRegionalBrief(point.latitude, point.longitude, { signal: controller.signal })
-      .then((payload) => {
-        if (!this.active
-          || requestToken !== this.regionalBriefRequestToken
-          || subjectId !== this.regionalBriefSubjectId) return;
-        this.regionalBrief = payload;
-        this.renderRegionalBrief(payload, info);
-      })
-      .catch((error) => {
-        if (error?.name !== 'AbortError'
-          && this.active
-          && requestToken === this.regionalBriefRequestToken
-          && subjectId === this.regionalBriefSubjectId) {
-          this.renderRegionalBriefStatus('unavailable', info);
-        }
-      })
-      .finally(() => {
-        if (this.regionalBriefAbort === controller) this.regionalBriefAbort = null;
-      });
-  }
-
-  renderRegionalBriefStatus(status, info) {
-    if (this.newsStatus) {
-      this.newsStatus.hidden = false;
-      this.newsStatus.dataset.state = status;
-      this.newsStatus.textContent = status === 'loading'
-        ? 'ACQUIRING REGIONAL NEWS'
-        : 'REGIONAL NEWS UNAVAILABLE';
-    }
-    if (status === 'unavailable') this.newsList?.replaceChildren();
-    if (this.localPlace && status === 'loading') this.localPlace.textContent = 'RESOLVING REGION';
-    if (this.localPlace && status === 'unavailable') this.localPlace.textContent = 'REGION UNAVAILABLE';
-    this.updateLocalPosition(info);
-  }
-
-  renderRegionalBrief(payload, info) {
-    const articles = Array.isArray(payload?.articles) ? payload.articles : [];
-    if (this.newsStatus) {
-      this.newsStatus.hidden = articles.length > 0;
-      this.newsStatus.dataset.state = payload?.newsStatus || 'unavailable';
-      this.newsStatus.textContent = payload?.newsStatus === 'empty'
-        ? 'NO RECENT LOCATION MATCHES'
-        : 'REGIONAL NEWS UNAVAILABLE';
-    }
-    if (this.newsList) {
-      this.newsList.replaceChildren(...articles.slice(0, 4).map((article) => {
-        const entry = document.createElement('li');
-        const link = document.createElement('a');
-        link.href = article.url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        const title = document.createElement('strong');
-        title.textContent = article.title;
-        const metadata = document.createElement('span');
-        metadata.textContent = `${article.domain || 'SOURCE'} · ${formatCockpitBriefAge(article.publishedAt)}`;
-        link.append(title, metadata);
-        entry.append(link);
-        return entry;
-      }));
-    }
-
-    const placeLabel = payload?.place?.label || payload?.place?.country || 'REGION UNAVAILABLE';
-    if (this.localPlace) this.localPlace.textContent = placeLabel.toUpperCase();
-    this.updateLocalPosition(info);
-    const weather = payload?.weather;
-    if (this.localTemperature) {
-      this.localTemperature.textContent = Number.isFinite(weather?.temperatureC)
-        ? `${Math.round(weather.temperatureC)}°C` : '—';
-    }
-    if (this.localWind) {
-      this.localWind.textContent = Number.isFinite(weather?.windKph)
-        ? `${Math.round(weather.windKph)} KM/H` : '—';
-    }
-    if (this.localWindDirection) {
-      this.localWindDirection.textContent = formatCockpitWindDirection(weather?.windDirectionDeg);
-    }
-    if (this.localCondition) this.localCondition.textContent = weatherCodeLabel(weather?.weatherCode);
-    if (this.localCloud) {
-      this.localCloud.textContent = Number.isFinite(weather?.cloudCoverPct)
-        ? `CLOUD ${Math.round(weather.cloudCoverPct)}%` : 'CLOUD UNKNOWN';
-    }
-    if (this.localPrecipitation) {
-      this.localPrecipitation.textContent = Number.isFinite(weather?.precipitationMm)
-        ? weather.precipitationMm.toFixed(1) : '—';
-    }
-    if (this.signalStream) this.signalStream.dataset.regionalStatus = payload?.status || 'partial';
-    if (this.briefPageIndex === 1 && this.briefSource) {
-      this.briefSource.textContent = `${String(payload?.newsSource || 'REGIONAL NEWS').toUpperCase()} · LOCATION QUERY`;
-    }
-    this.scheduleContextLayout();
-  }
-
-  renderCockpitSignals() {
-    if (!this.signalList) return;
-    const existing = [...this.signalList.children];
-    const focusedEntry = existing.find((entry) => entry.contains(document.activeElement));
-    const entriesByKey = new Map();
-    for (const entry of existing) {
-      const key = entry.dataset.signalKey;
-      if (!entriesByKey.has(key)) entriesByKey.set(key, []);
-      entriesByKey.get(key).push(entry);
-    }
-    const setText = (element, value) => {
-      if (element.textContent !== value) element.textContent = value;
-    };
-    const entries = this.signalItems.map((item) => {
-      // Identity includes the action target: a reused status key must never
-      // silently turn a focused flight button into a different selection.
-      const key = JSON.stringify([
-        item.key, Boolean(item.target), item.target?.layerId || '', String(item.target?.id ?? ''),
-      ]);
-      let entry = entriesByKey.get(key)?.shift();
-      if (!entry) {
-        entry = document.createElement('li');
-        entry.dataset.signalKey = key;
-        const time = document.createElement('time');
-        const body = document.createElement('div');
-        const heading = document.createElement(item.target ? 'button' : 'strong');
-        if (item.target) {
-          heading.type = 'button';
-          heading.className = 'cockpit-signal-target';
-          const label = document.createElement('span');
-          label.className = 'cockpit-signal-target-label';
-          const rule = document.createElement('span');
-          rule.className = 'cockpit-signal-target-rule';
-          rule.setAttribute('aria-hidden', 'true');
-          const chevron = document.createElement('span');
-          chevron.className = 'material-symbols-outlined cockpit-signal-target-chevron';
-          chevron.setAttribute('aria-hidden', 'true');
-          chevron.textContent = 'chevron_right';
-          heading.append(label, rule, chevron);
-        }
-        body.append(heading, document.createElement('span'));
-        entry.append(time, body);
-      }
-      const [time, body] = entry.children;
-      const [heading, copy] = body.children;
-      const className = item.target ? `${item.tone} actionable` : item.tone;
-      if (entry.className !== className) entry.className = className;
-      setText(time, new Date(item.timestamp).toISOString().slice(11, 19) + 'Z');
-      if (item.target) {
-        heading.dataset.signalLayer = item.target.layerId;
-        heading.dataset.signalId = item.target.id;
-        const label = `Select flight ${item.title}`;
-        if (heading.getAttribute('aria-label') !== label) heading.setAttribute('aria-label', label);
-        setText(heading.children[0], item.title);
-      } else {
-        setText(heading, item.title);
-      }
-      setText(copy, item.detail);
-      return entry;
-    });
-    const retainedFocus = entries.includes(focusedEntry) ? focusedEntry : null;
-    if (focusedEntry && !retainedFocus) {
-      // A departed contact cannot remain selectable. Continue from the stable
-      // briefing footer instead of dropping keyboard traversal to the page top.
-      (this.briefTabs?.[this.briefPageIndex] || this.signalToggle)?.focus({ preventScroll: true });
-    }
-    for (const entry of existing) if (!entries.includes(entry)) entry.remove();
-
-    // Ordinary insertBefore moves disconnect an element and lose its focus.
-    // Reorder the other rows around the focused row, which stays connected.
-    const focusIndex = retainedFocus ? entries.indexOf(retainedFocus) : -1;
-    if (retainedFocus) {
-      let anchor = retainedFocus;
-      for (let index = focusIndex - 1; index >= 0; index -= 1) {
-        const entry = entries[index];
-        if (entry.nextElementSibling !== anchor) this.signalList.insertBefore(entry, anchor);
-        anchor = entry;
-      }
-    }
-    let anchor = retainedFocus ? retainedFocus.nextElementSibling : this.signalList.firstElementChild;
-    for (let index = focusIndex + 1; index < entries.length; index += 1) {
-      const entry = entries[index];
-      if (entry === anchor) anchor = anchor.nextElementSibling;
-      else this.signalList.insertBefore(entry, anchor);
-    }
-    this.scheduleContextLayout();
-  }
-
-  pushCockpitSignal(key, tone, title, detail, target = null) {
-    if (!this.signalList || !title || !detail) return;
-    const signature = `${title}|${detail}|${target?.layerId || ''}|${target?.id || ''}`;
-    if (this.signalSignatures.get(key) === signature) return;
-    this.signalSignatures.set(key, signature);
-    this.signalItems.unshift({ key, tone, title, detail, target, timestamp: Date.now() });
-    this.signalItems = this.signalItems.slice(0, 5);
-    this.renderCockpitSignals();
-  }
-
-  updateCockpitSignals(snapshot, unknownCount) {
-    const previous = new Map(this.signalItems.map((item) => [item.key, item]));
-    const contacts = [];
-    const subject = snapshot.subject;
-    if (['flights', 'military'].includes(subject?.layerId) && subject?.id) {
-      contacts.push({
-        key: `flight:${subject.layerId}:${subject.id}`,
-        tone: 'track',
-        title: subject.label || subject.id,
-        detail: `${subject.layerId === 'military' ? 'MILITARY FLIGHT' : 'COMMERCIAL FLIGHT'} · CURRENT`,
-        target: { layerId: subject.layerId, id: String(subject.id) },
-        distanceM: -1,
-      });
-    }
-    for (const cohort of snapshot.cohorts) {
-      if (!['flights', 'military'].includes(cohort.id)) continue;
-      for (const item of cohort.nearest) {
-        const id = item.icao24 || item.id;
-        if (!id) continue;
-        contacts.push({
-          key: `flight:${cohort.id}:${id}`,
-          tone: cohort.id === 'military' ? 'nearby military' : 'nearby',
-          // `id` above is IDENTITY (the ICAO hex). Display must not reuse it:
-          // the row's own `id` already carries the layer's label convention
-          // (callsign → registration → hex), so a callsign-less enriched
-          // contact reads as its registration here too. Same helper the
-          // Context panel's nearest list uses.
-          title: formatAwarenessLabel(item),
-          detail: `${cohort.id === 'military' ? 'MILITARY FLIGHT' : 'COMMERCIAL FLIGHT'} · ${
-            Number.isFinite(item.distanceM)
-              ? `${item.distanceM < 10000 ? (item.distanceM / 1000).toFixed(1) : Math.round(item.distanceM / 1000)} KM`
-              : 'DISTANCE UNKNOWN'
-          }`,
-          target: { layerId: cohort.id, id: String(id) },
-          distanceM: item.distanceM ?? Infinity,
-        });
-      }
-    }
-    contacts.sort((a, b) => a.distanceM - b.distanceM);
-    const nextItems = contacts.slice(0, 5).map((item) => ({
-      ...item,
-      timestamp: previous.get(item.key)?.timestamp || snapshot.evaluatedAt || Date.now(),
-    }));
-    if (unknownCount) {
-      const sources = snapshot.cohorts
-        .filter((cohort) => cohort.count === null)
-        .map((cohort) => cohort.source)
-        .join(' · ');
-      nextItems.splice(4, Math.max(0, nextItems.length - 4), {
-        key: 'input-status',
-        tone: 'warning',
-        title: `${unknownCount} INPUT${unknownCount === 1 ? '' : 'S'} UNKNOWN`,
-        detail: sources || 'SOURCE STATUS UNAVAILABLE',
-        target: null,
-        timestamp: previous.get('input-status')?.timestamp || snapshot.evaluatedAt || Date.now(),
-      });
-    }
-    this.signalItems = nextItems;
-    this.signalSignatures.clear();
-    this.renderCockpitSignals();
-  }
-
-  setContextCollapsed(collapsed) {
-    const wasCollapsed = this.contextCollapsed;
-    this.contextCollapsed = Boolean(collapsed);
-    if (this.context) this.context.dataset.collapsed = String(this.contextCollapsed);
-    if (this.contextToggle) {
-      const expanded = !this.contextCollapsed;
-      this.contextToggle.setAttribute('aria-expanded', String(expanded));
-      this.contextToggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} Contact panel`);
-      this.contextToggle.title = `${expanded ? 'Collapse' : 'Expand'} contact panel`;
-      const icon = this.contextToggle.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = expanded ? 'chevron_left' : 'chevron_right';
-    }
-    if (this.active && wasCollapsed && !this.contextCollapsed) {
-      window.dispatchEvent(new CustomEvent('gev:cockpit-context-expanded'));
-    }
-    this.scheduleContextLayout();
-  }
-
-  setSignalCollapsed(collapsed, { user = false } = {}) {
-    const wasCollapsed = this.signalCollapsed;
-    this.signalCollapsed = Boolean(collapsed);
-    if (user) this.signalUserCollapsed = this.signalCollapsed;
-    if (this.signalStream) this.signalStream.dataset.collapsed = String(this.signalCollapsed);
-    if (this.signalToggle) {
-      const expanded = !this.signalCollapsed;
-      this.signalToggle.setAttribute('aria-expanded', String(expanded));
-      this.signalToggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} cockpit briefing panel`);
-      this.signalToggle.title = `${expanded ? 'Collapse' : 'Expand'} briefing panel`;
-      const icon = this.signalToggle.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = expanded ? 'right_panel_close' : 'right_panel_open';
-    }
-    if (this.signalCollapsed) this.stopBriefRotation();
-    else this.startBriefRotation({ reset: true });
-    if (this.active && wasCollapsed && !this.signalCollapsed) {
-      window.dispatchEvent(new CustomEvent('gev:cockpit-signal-expanded'));
-    }
-    this.scheduleContextLayout();
-  }
-
-  syncContextLayout() {
-    if (!this.context || this.context.hidden) return;
-    if (window.matchMedia('(max-width: 760px)').matches) {
-      this.context.dataset.layoutMode = 'compact-bottom';
-      this.context.style.removeProperty('--cockpit-context-left');
-      this.context.style.removeProperty('--cockpit-context-top');
-      this.context.style.removeProperty('--cockpit-context-max-height');
-      return;
-    }
-
-    const desktopInset = Math.max(24, Math.min(58, window.innerWidth * 0.04));
-    this.context.dataset.layoutMode = 'bottom-left';
-    this.context.style.setProperty('--cockpit-context-left', `${desktopInset.toFixed(1)}px`);
-    this.context.style.removeProperty('--cockpit-context-top');
-    this.context.style.removeProperty('--cockpit-context-max-height');
-  }
-
-  syncSignalLayout() {
-    if (!this.signalStream || this.signalStream.hidden) return;
-    const utilityControls = document.getElementById('cockpit-utility-controls');
-    if (window.matchMedia('(max-width: 760px)').matches) {
-      this.signalStream.dataset.layoutMode = 'compact-top';
-      utilityControls?.classList.remove('layout-primary-only');
-      utilityControls?.querySelectorAll('.cockpit-utility-control').forEach((control) => {
-        const hiddenSibling = Boolean(
-          utilityControls.querySelector('.cockpit-utility-control.is-expanded')
-          && !control.classList.contains('is-expanded')
-        );
-        control.setAttribute('aria-hidden', String(hiddenSibling));
-      });
-      this.hud?.style.removeProperty('--cockpit-utility-top');
-      this.hud?.style.removeProperty('--cockpit-utility-max-height');
-      this.hud?.style.removeProperty('--cockpit-utility-expanded-max-height');
-      this.signalStream.style.removeProperty('--cockpit-signal-right');
-      this.signalStream.style.removeProperty('--cockpit-signal-top');
-      this.signalStream.style.removeProperty('--cockpit-signal-max-height');
-      return;
-    }
-
-    const desktopInset = Math.max(24, Math.min(58, window.innerWidth * 0.04));
-    this.signalStream.dataset.layoutMode = 'bottom-right';
-    this.signalStream.style.setProperty('--cockpit-signal-right', `${desktopInset.toFixed(1)}px`);
-    this.signalStream.style.removeProperty('--cockpit-signal-top');
-    this.signalStream.style.removeProperty('--cockpit-signal-max-height');
-    const signalBounds = this.signalStream.getBoundingClientRect();
-    const utilityBounds = utilityControls?.getBoundingClientRect();
-    if (utilityBounds) {
-      const expandedControl = utilityControls?.querySelector('.cockpit-utility-control.is-expanded');
-      const collapsedControl = utilityControls?.querySelector(
-        '.cockpit-utility-control:not(.is-expanded)',
-      );
-      const collapsedLauncher = collapsedControl?.querySelector('.cockpit-utility-launcher');
-      const expandedHeight = expandedControl
-        ? Math.max(expandedControl.scrollHeight, expandedControl.getBoundingClientRect().height)
-        : 0;
-      const collapsedHeight = collapsedLauncher
-        ? Math.max(COCKPIT_UTILITY_LAUNCHER_MIN_HEIGHT_PX, collapsedLauncher.scrollHeight)
-        : 0;
-      // Cockpit owns this anchor outright. The strip used to inherit the left
-      // accordion's committed top, which is solved against left-lane obstacles
-      // and dropped the strip straight through the briefing card below it.
-      // The readout only anchors the strip while it is genuinely on screen:
-      // the Minimal variant drops it with `display:none`, but HUD Off hides the
-      // whole Intel HUD with `visibility`/`opacity`, which keeps its rect.
-      const recReadout = document.querySelector('#intel-hud .hud-top-right');
-      const recBounds = isRenderedOnScreen(recReadout) ? recReadout.getBoundingClientRect() : null;
-      const utilityAnchor = resolveCockpitUtilityAnchor({
-        recBottom: recBounds ? recBounds.bottom : 0,
-        signalTop: signalBounds.top,
-        stripHeight: utilityBounds.height,
-        viewportHeight: window.innerHeight,
-        collapsedHeight,
-        recGap: COCKPIT_UTILITY_REC_GAP_PX,
-        signalGap: COCKPIT_UTILITY_SIGNAL_GAP_PX,
-        minTopFloor: COCKPIT_UTILITY_MIN_TOP_PX,
-        minTopRatio: COCKPIT_UTILITY_MIN_TOP_RATIO,
-      });
-      const availableHeight = utilityAnchor.maxHeight;
-      this.hud?.style.setProperty('--cockpit-utility-top', `${utilityAnchor.top.toFixed(1)}px`);
-      this.hud?.style.setProperty('--cockpit-utility-max-height', `${availableHeight.toFixed(2)}px`);
-      const utilityLayout = expandedControl && collapsedControl
-        ? resolveCockpitUtilityLayout({ availableHeight, expandedHeight, collapsedHeight })
-        : { primaryOnly: false, expandedMaxHeight: availableHeight };
-      utilityControls?.classList.toggle('layout-primary-only', utilityLayout.primaryOnly);
-      this.hud?.style.setProperty(
-        '--cockpit-utility-expanded-max-height',
-        `${utilityLayout.expandedMaxHeight.toFixed(2)}px`,
-      );
-      utilityControls?.querySelectorAll('.cockpit-utility-control').forEach((control) => {
-        const hiddenSibling = utilityLayout.primaryOnly && control === collapsedControl;
-        control.setAttribute('aria-hidden', String(hiddenSibling));
-        if (hiddenSibling && control.contains(document.activeElement)) {
-          expandedControl?.querySelector('.cockpit-utility-glyph')?.focus({ preventScroll: true });
-        }
-      });
-    }
-  }
-
-  dispose() {
-    this.exit({ restoreTracking: false });
-    this.regionalBriefAbort?.abort();
-    this.regionalBriefAbort = null;
-    this.regionalBriefRequestToken += 1;
-    this.stopBriefRotation();
-    if (this.contextLayoutFrame !== null) cancelAnimationFrame(this.contextLayoutFrame);
-    this.contextLayoutFrame = null;
-    for (const removeListener of this._listenerRemovers.splice(0)) removeListener?.();
-  }
-}
-
 export class StyleManager {
   /**
    * @param {Cesium.Viewer} viewer - The CesiumJS viewer instance.
@@ -2210,7 +681,13 @@ export class StyleManager {
     this._recordingMode = false;
     this._recordingConfig = { hidePanels: true, hudMode: 'minimal', safeFrame: '16:9' };
     this._preRecordingHudState = null;
-    this._panelZCounter = PANEL_Z_BASE + 10;
+    this.panelLayoutController = new PanelLayoutController({
+      getStorageKey: (panelId) => this._panelStorageKey(panelId),
+      onLayoutRightPanels: () => this._layoutRightPanels(),
+      onSyncCctvPanelViewport: () => this._syncCctvPanelViewport(),
+      panelZBase: PANEL_Z_BASE,
+      panelZMax: PANEL_Z_MAX,
+    });
     this._animFrameId = null;
     this._lastLoadingFeedbackUpdateAt = 0;
     this._loadingFeedbackState = createLoadingFeedbackState();
@@ -2329,7 +806,6 @@ export class StyleManager {
     this._scopeFeatherValue = document.getElementById('scope-feather-value');
     this._mapStackChips = document.getElementById('map-stack-chips');
     this._mapStackStatus = document.getElementById('map-stack-status');
-    this._mapStackChangeHandler = null;
     this._cleanViewBtn = document.getElementById('clean-view-toggle');
     this._cleanViewExitBtn = document.getElementById('clean-view-exit');
     this._dataPanel = document.getElementById('data-panel');
@@ -2470,6 +946,29 @@ export class StyleManager {
 
     // Intel HUD
     this.hud = new IntelHUD(viewer);
+    this.keyboardFocusController = new KeyboardFocusController({
+      getLocationSearch: () => this._locationSearch,
+      onSetStyle: (style) => this.setStyle(style),
+      onToggleHud: () => {
+        this.shareLinkManager?.claimRestoreLane?.('visual');
+        this.hud.toggle();
+        this._updateHudButtonState();
+        this._syncShareState();
+      },
+      onToggleOrbit: () => this._toggleOrbit(),
+      onToggleCleanView: () => this.toggleCleanView(),
+      onToggleDataPanel: () => document.getElementById('data-panel').classList.toggle('active'),
+      onCycleDetection: () => {
+        this.shareLinkManager?.claimRestoreLane?.('visual');
+        this._detectionUserOverridden = true;
+        cycleDetectionMode();
+        this._syncShareState();
+      },
+      onToggleCctv: () => this._toggleCctvEnabled(),
+      getExpandedCityId: () => this._expandedCityId,
+      getPoiCount: (cityId) => CITY_POIS[cityId]?.pois.length || 0,
+      onPoiSelect: (cityId, index) => this._onPoiClick(cityId, index),
+    });
     this._cockpitVisionMode = 'optical';
     this._cockpitVisionRestore = null;
     this._cockpitPanelRestore = null;
@@ -2657,6 +1156,27 @@ export class StyleManager {
     // from deterministic markup defaults instead of recipient-local panel
     // preferences. Encoded panel fields are applied after all panels exist.
     this._initialShareState = this.shareLinkManager.parseInitialHash();
+    this.mapStackStyleController = new MapStackStyleController({
+      mapStackController: this.mapStackController,
+      mapStackChips: this._mapStackChips,
+      shareLinkManager: this.shareLinkManager,
+      onSyncShareState: () => this._syncShareState(),
+      onShowToast: (message) => this._showToast(message),
+      getActiveStyle: () => this.activeStyle,
+      setActiveStyle: (style) => { this.activeStyle = style; },
+      stages: this.stages,
+      onSetCelestialRingEnabled: (...args) => this.setCelestialRingEnabled(...args),
+      onStartTransition: (...args) => this._startTransition(...args),
+      onApplyStylePresetDefaults: (...args) => this._applyStylePresetDefaults(...args),
+      styleIndicator: this._styleIndicator,
+      onUpdateStyleMiniStatus: (...args) => this._updateStyleMiniStatus(...args),
+      onUpdateSliderPanel: (...args) => this._updateSliderPanel(...args),
+      onRevealStyleParameters: () => this._revealStyleParameters(),
+      hud: this.hud,
+      onUpdateHudButtonState: () => this._updateHudButtonState(),
+      onSyncIrBoost: () => this._syncIrBoost(),
+      onSyncCockpitInheritedStyle: () => this._syncCockpitInheritedStyle(),
+    });
 
     this._detectionBtn = document.getElementById('detection-toggle');
     this._models3dBtn = document.getElementById('models3d-toggle');
@@ -3403,51 +1923,7 @@ export class StyleManager {
       btn.addEventListener('click', () => this.setStyle(btn.dataset.style));
     });
 
-    // Keyboard shortcuts: 1-7, H, Escape
-    this._globalKeydownHandler = (e) => {
-      // Ignore when interacting with a form control (except Escape). Global
-      // hotkeys ('1'-'7', 'h', 'o', 'v', 'd', 'c', 'f') otherwise fire while a
-      // <select> dropdown (e.g. HUD layout) is focused and its native
-      // type-ahead is in use, or while typing in a text field (M9).
-      const isFormControl = e.target?.matches?.('select, input, textarea')
-        || e.target === this._locationSearch;
-      if (isFormControl && e.key !== 'Escape') return;
-
-      const keyMap = {
-        '1': 'normal', '2': 'retro', '3': 'surveillance',
-        '4': 'thermal', '5': 'anime', '6': 'noir',
-        '7': 'snow',
-      };
-      if (keyMap[e.key]) this.setStyle(keyMap[e.key]);
-      if (e.key === 'Escape') {
-        if (this._locationSearch.classList.contains('expanded')) {
-          this._locationSearch.classList.remove('expanded');
-          this._locationSearch.value = '';
-          this._locationSearch.blur();
-        }
-      }
-      if (e.key.toLowerCase() === 'h') {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this.hud.toggle();
-        this._updateHudButtonState();
-        this._syncShareState();
-      }
-      if (e.key.toLowerCase() === 'o') this._toggleOrbit();
-      if (e.key.toLowerCase() === 'v') this.toggleCleanView();
-      if (e.key.toLowerCase() === 'f') {
-        document.getElementById('data-panel').classList.toggle('active');
-      }
-      if (e.key.toLowerCase() === 'd') {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        this._detectionUserOverridden = true;
-        cycleDetectionMode();
-        this._syncShareState();
-      }
-      if (e.key.toLowerCase() === 'c') {
-        this._toggleCctvEnabled();
-      }
-    };
-    document.addEventListener('keydown', this._globalKeydownHandler);
+    this.keyboardFocusController.attach();
 
     // Bloom toggle
     this._bloomBtn.addEventListener('click', () => {
@@ -3560,27 +2036,7 @@ export class StyleManager {
    * @returns {void}
    */
   _initMapStackControl() {
-    if (!this._mapStackChips || !this.mapStackController) return;
-
-    if (!this._mapStackChangeHandler) {
-      // Provider-driven transitions (notably Esri tile-error fallback) do not
-      // pass through `_setMapStack()`. Follow the controller's existing public
-      // event so the lit tile, the status line, AND the durable share state all
-      // describe the rendered source — without the share sync, a silent
-      // fallback leaves copyLink() encoding a stack that is no longer shown.
-      this._mapStackChangeHandler = (event) => {
-        this._renderMapStackState(event.detail);
-        this._syncShareState();
-      };
-      window.addEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-    }
-
-    renderMapStackChips(this._mapStackChips, this.mapStackController.getStacks(), {
-      activeId: this.mapStackController.getActiveId(),
-      onSelect: (stackId) => { this._setMapStack(stackId); },
-    });
-
-    this._renderMapStackState(this.mapStackController.getState());
+    this.mapStackStyleController.initMapStackControl();
   }
 
   /**
@@ -3591,17 +2047,7 @@ export class StyleManager {
    * @returns {Promise<void>}
    */
   async _setMapStack(stackId, { syncShare = true } = {}) {
-    if (!this.mapStackController) return;
-    if (syncShare) this.shareLinkManager?.claimRestoreLane?.('map');
-    const before = this.mapStackController.getActiveId();
-    this._renderMapStackState(this.mapStackController.getState('switching'));
-    const state = await this.mapStackController.setStack(stackId);
-    this._renderMapStackState(state);
-
-    if (state?.activeId === before && stackId !== before && state?.lastError) {
-      this._showToast(state.lastError);
-    }
-    if (syncShare) this._syncShareState();
+    return this.mapStackStyleController.setMapStackInternal(stackId, { syncShare });
   }
 
   /**
@@ -3612,8 +2058,7 @@ export class StyleManager {
    * @returns {void}
    */
   _renderMapStackState(state) {
-    if (!state) return;
-    syncMapStackChips(this._mapStackChips, state.activeId);
+    this.mapStackStyleController.renderMapStackState(state);
     if (this._mapStackStatus) {
       const stack = state.activeStack;
       const label = state.status === 'switching'
@@ -5103,7 +3548,7 @@ export class StyleManager {
       let activationIntent = null;
       let terminalIntentOutcome = null;
       try {
-        activationIntent = this._dataManager._setEnabledWithIntent(
+        activationIntent = this._dataManager.supersedeLayerVisibility(
           entryLayerId,
           true,
           { notificationToken, ...(signal ? { signal } : {}) },
@@ -5114,7 +3559,7 @@ export class StyleManager {
           intentEpoch: activationIntent.intentEpoch,
         };
         activated = await activationIntent.promise;
-        terminalIntentOutcome = await this._dataManager._waitForVisibilityIntent?.(
+        terminalIntentOutcome = await this._dataManager.waitForLayerVisibilityIntent?.(
           entryLayerId,
           activationIntent.intentEpoch,
         );
@@ -5128,7 +3573,7 @@ export class StyleManager {
         ? this._contextModeReplacementIntent
         : null;
       while (replacementIntent) {
-        const outcome = await this._dataManager._waitForVisibilityIntent?.(
+        const outcome = await this._dataManager.waitForLayerVisibilityIntent?.(
           entryLayerId,
           replacementIntent.intentEpoch,
         );
@@ -7641,11 +6086,7 @@ export class StyleManager {
    * @returns {void}
    */
   _pinPanelToRight(panelEl) {
-    if (!panelEl) return;
-    const rect = panelEl.getBoundingClientRect();
-    const rightOffset = Math.max(6, Math.round(window.innerWidth - rect.right));
-    panelEl.style.right = `${rightOffset}px`;
-    panelEl.style.left = 'auto';
+    this.panelLayoutController.pinPanelToRight(panelEl);
   }
 
   /**
@@ -7656,24 +6097,7 @@ export class StyleManager {
    * @returns {void}
    */
   _restorePanelPosition(panelId, panelEl) {
-    try {
-      const raw = localStorage.getItem(this._panelStorageKey(panelId));
-      if (!raw) return;
-      const pos = JSON.parse(raw);
-      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return;
-      // Clamp to the viewport: a position saved at one window size would otherwise land off-screen at
-      // another (audit U2 — observed a panel at x:-192). The drag handler clamps; restore must too.
-      const { left, top } = this._clampToViewport(Math.round(pos.left), Math.round(pos.top), panelEl);
-      panelEl.style.left = `${left}px`;
-      panelEl.style.top = `${top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      if (panelId === 'pp-toggles') {
-        this._pinPanelToRight(panelEl);
-      }
-    } catch {
-      // ignore malformed saved panel position
-    }
+    this.panelLayoutController.restorePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -7685,13 +6109,7 @@ export class StyleManager {
    * @returns {{left:number, top:number}}
    */
   _clampToViewport(left, top, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-    const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-    return {
-      left: Math.max(6, Math.min(maxLeft, left)),
-      top: Math.max(6, Math.min(maxTop, top)),
-    };
+    return this.panelLayoutController.clampToViewport(left, top, panelEl);
   }
 
   /**
@@ -7701,15 +6119,7 @@ export class StyleManager {
    * @returns {void}
    */
   _savePanelPosition(panelId, panelEl) {
-    const rect = panelEl.getBoundingClientRect();
-    try {
-      localStorage.setItem(this._panelStorageKey(panelId), JSON.stringify({
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-      }));
-    } catch {
-      // storage unavailable
-    }
+    this.panelLayoutController.savePanelPosition(panelId, panelEl);
   }
 
   /**
@@ -7732,81 +6142,11 @@ export class StyleManager {
    * @returns {void}
    */
   _promotePanelZ(panelEl) {
-    this._panelZCounter += 1;
-    if (this._panelZCounter > PANEL_Z_MAX) {
-      const promoted = [...document.querySelectorAll('.panel-draggable')]
-        .filter((el) => el.style.zIndex)
-        .sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
-      let z = PANEL_Z_BASE + 1;
-      for (const el of promoted) {
-        el.style.zIndex = String(z);
-        z += 1;
-      }
-      this._panelZCounter = z;
-    }
-    panelEl.style.zIndex = String(this._panelZCounter);
+    this.panelLayoutController.promotePanelZ(panelEl);
   }
 
   _makePanelDraggable(panelId, panelEl, handleEl) {
-    // Z-order promotion: bring clicked panel to front of the stacking context
-    panelEl.addEventListener('pointerdown', () => {
-      this._promotePanelZ(panelEl);
-    });
-
-    handleEl.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      if (event.target.closest('.panel-collapse-btn')) return;
-      if (event.target.closest('input, select, option, button:not(.panel-collapse-btn)')) return;
-
-      event.preventDefault();
-      const rect = panelEl.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const offsetX = startX - rect.left;
-      const offsetY = startY - rect.top;
-
-      panelEl.style.left = `${rect.left}px`;
-      panelEl.style.top = `${rect.top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
-      panelEl.classList.add('panel-dragging');
-      this._promotePanelZ(panelEl);
-
-      const onMove = (moveEvent) => {
-        const nextLeftRaw = moveEvent.clientX - offsetX;
-        const nextTopRaw = moveEvent.clientY - offsetY;
-        const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-        const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-        const nextLeft = Math.max(6, Math.min(maxLeft, nextLeftRaw));
-        const nextTop = Math.max(6, Math.min(maxTop, nextTopRaw));
-        panelEl.style.left = `${nextLeft}px`;
-        panelEl.style.top = `${nextTop}px`;
-        if (panelId === 'pp-toggles') {
-          this._layoutRightPanels();
-        }
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      const onUp = () => {
-        panelEl.classList.remove('panel-dragging');
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-        if (panelId === 'pp-toggles') {
-          this._pinPanelToRight(panelEl);
-        }
-        this._savePanelPosition(panelId, panelEl);
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
-    });
+    this.panelLayoutController.makePanelDraggable(panelId, panelEl, handleEl);
   }
 
   _buildSharePanelState() {
@@ -8134,25 +6474,7 @@ export class StyleManager {
    * @returns {Promise<{ok: boolean, activeStack?: string, error?: string|null, available?: string[]}>}
    */
   async setMapStack(stackId) {
-    if (!this.mapStackController) {
-      return { ok: false, error: 'Map stack controller unavailable' };
-    }
-    const stacks = this.mapStackController.getStacks();
-    const target = stacks.find((stack) => stack.id === stackId);
-    if (!target) {
-      return { ok: false, error: `Unknown map stack: ${stackId}`, available: stacks.map((s) => s.id) };
-    }
-    if (!target.available) {
-      return { ok: false, error: `${target.label} requires a Cesium ion token`, activeStack: this.mapStackController.getActiveId() };
-    }
-    await this._setMapStack(stackId);
-    const state = this.mapStackController.getState();
-    const landed = state.activeId === stackId;
-    return {
-      ok: landed,
-      activeStack: state.activeId,
-      error: landed ? null : (state.lastError || 'Map stack did not switch'),
-    };
+    return this.mapStackStyleController.setMapStack(stackId);
   }
 
   /**
@@ -9185,63 +7507,7 @@ export class StyleManager {
     revealParameters = applyPreset,
     restore = false,
   } = {}) {
-    if (!restore) this.shareLinkManager?.claimRestoreLane?.('visual');
-    if (styleName === this.activeStyle) {
-      if (revealParameters && styleName !== 'normal') this._revealStyleParameters();
-      return;
-    }
-
-    const previousStyle = this.activeStyle;
-    this.activeStyle = styleName;
-    document.documentElement.dataset.gevStyle = styleName;
-
-    // The celestial optics treatment belongs to the unfiltered globe only.
-    // Leaving Normal turns it off; returning merely re-enables the control.
-    this.setCelestialRingEnabled(false, { syncShare: false, focus: false });
-
-    // Transition out the previous shader style
-    if (previousStyle !== 'normal' && this.stages[previousStyle]) {
-      this._startTransition(previousStyle, this.stages[previousStyle].uniforms.intensity, 0.0);
-    }
-
-    // Transition in the new shader style
-    if (styleName !== 'normal' && this.stages[styleName]) {
-      this._startTransition(styleName, this.stages[styleName].uniforms.intensity, 1.0);
-    }
-
-    if (applyPreset) {
-      this._applyStylePresetDefaults(styleName);
-    }
-
-    // Update button UI
-    document.querySelectorAll('.style-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.style === styleName);
-    });
-
-    // Update style indicator
-    const displayNames = { surveillance: 'NVG', thermal: 'FLIR', retro: 'CRT' };
-    this._styleIndicator.textContent = displayNames[styleName] || styleName.toUpperCase();
-    this._updateStyleMiniStatus(styleName);
-
-    // Update parameter sliders
-    this._updateSliderPanel(styleName, { reveal: revealParameters });
-
-    // Notify HUD (color adaptation + auto show/hide)
-    this.hud.onStyleChange(styleName);
-    this._updateHudButtonState();
-
-    // Sync detection overlay tone to active post-process style
-    setDetectionStyle(styleName);
-    this._syncIrBoost();
-    window.dispatchEvent(new CustomEvent('gev:style-change', {
-      detail: { style: styleName },
-    }));
-
-    this._syncCockpitInheritedStyle();
-
-    // Notify share link manager
-    this.shareLinkManager.onStyleChange(styleName);
-    this._syncShareState();
+    this.mapStackStyleController.setStyle(styleName, { applyPreset, revealParameters, restore });
   }
 
   // ── Shader transitions ────────────────────────
@@ -9446,8 +7712,6 @@ export class StyleManager {
    * @returns {void}
    */
   _initLocationBar() {
-    const QWERTY_KEYS = ['Q', 'W', 'E', 'R', 'T'];
-
     // Render city pills (no submenu wrappers — POI row is separate)
     for (const [cityId, city] of Object.entries(CITY_POIS)) {
       const pill = document.createElement('button');
@@ -9458,24 +7722,7 @@ export class StyleManager {
       this._locationPills.appendChild(pill);
     }
 
-    // QWERTY keyboard navigation for POIs
-    this._poiKeydownHandler = (e) => {
-      if (!this._expandedCityId) return;
-      // Bail while a form control is focused so POI hotkeys don't fire from a
-      // <select> dropdown's type-ahead or while typing in a field (M9).
-      const isFormControl = e.target?.matches?.('select, input, textarea')
-        || e.target === this._locationSearch;
-      if (isFormControl) return;
-
-      const keyIndex = QWERTY_KEYS.indexOf(e.key.toUpperCase());
-      if (keyIndex === -1) return;
-
-      const city = CITY_POIS[this._expandedCityId];
-      if (city && keyIndex < city.pois.length) {
-        this._onPoiClick(this._expandedCityId, keyIndex);
-      }
-    };
-    document.addEventListener('keydown', this._poiKeydownHandler);
+    this.keyboardFocusController.attachPoiNavigation();
 
     // Search toggle (expand/collapse)
     this._searchToggle.addEventListener('click', () => {
@@ -10332,10 +8579,7 @@ export class StyleManager {
       window.removeEventListener('gev:awareness-subject-cleared', this._awarenessClearedHandler);
       this._awarenessClearedHandler = null;
     }
-    if (this._mapStackChangeHandler) {
-      window.removeEventListener('gev:map-stack-changed', this._mapStackChangeHandler);
-      this._mapStackChangeHandler = null;
-    }
+    this.mapStackStyleController?.dispose();
     // Invalidate any in-flight Context transaction the same way a newer request
     // would. Without this, a reinstatement already past its awaits could
     // re-enable a mode's entry layer and republish `_contextMode` while the
@@ -10357,7 +8601,13 @@ export class StyleManager {
     this._removeNavigationAuthorityListener = null;
     this._contextModeChanging = true;
     this._contextMode = null;
-    await this._restoreContextSession();
+    let restoreError = null;
+    try {
+      await this._restoreContextSession();
+    } catch (error) {
+      // Teardown still owns every later resource even when restoration fails.
+      restoreError = error;
+    }
     // IR boost teardown BEFORE detaching the data manager: restore fog and
     // un-boost both aircraft layers so a surviving viewer or replacement
     // manager doesn't inherit sensor state (review P2, 2026-08-16).
@@ -10414,14 +8664,7 @@ export class StyleManager {
       this._loadingVisibilityHandler = null;
     }
     this._stopLoadingFeedbackTicker();
-    if (this._globalKeydownHandler) {
-      document.removeEventListener('keydown', this._globalKeydownHandler);
-      this._globalKeydownHandler = null;
-    }
-    if (this._poiKeydownHandler) {
-      document.removeEventListener('keydown', this._poiKeydownHandler);
-      this._poiKeydownHandler = null;
-    }
+    this.keyboardFocusController?.dispose();
     // Cancel the rAF animation loop and release its governor hold; also stop
     // the traffic-chip ticker the loop no longer carries. (perf wave 2 fix)
     if (this._animFrameId) {
@@ -10494,5 +8737,6 @@ export class StyleManager {
     destroyWorldOverlay();
     // Clear transitions
     this.transitions.clear();
+    if (restoreError) throw restoreError;
   }
 }

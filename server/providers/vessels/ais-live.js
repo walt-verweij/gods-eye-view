@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { createAisStreamAdapter } from '../../../src/data/aisStreamAdapter.js';
 import { parseSilenceTimeoutEnv } from '../../../src/data/aisWatchdog.js';
 import { clampInt } from '../common/query.js';
+import { registerProxy } from '../common/proxy.js';
 import {
   AISSTREAM_CACHE_MAX,
   AISSTREAM_STALE_MS,
@@ -152,7 +153,7 @@ export function aisLiveProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'ais-live-proxy',
     configureServer(server) {
       install(server.middlewares);
@@ -162,16 +163,11 @@ export function aisLiveProxy() {
       // interval and another socket.
       server.httpServer?.on('close', disposeAisStream);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-      startAisStreamWatchdogTick();
-      server.httpServer?.on('close', disposeAisStream);
-    },
     // Middleware-mode backstop: there is no httpServer to hang 'close' on.
     closeBundle() {
       disposeAisStream();
     },
-  };
+  });
 }
 
 /**
