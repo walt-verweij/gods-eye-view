@@ -793,6 +793,7 @@ export function createRadioProxyMiddleware({ fetchImpl = null, lookupImpl = look
         fetchImpl: fetchImpl || undefined,
         timeoutMs: RADIO_FETCH_TIMEOUT_MS,
         maxRedirects: 0,
+        transport: 'pinned',
       };
       const response = await guardedFetch(destination.href, options);
       if (response.status >= 300 && response.status < 400) {
@@ -1170,7 +1171,7 @@ export function overpassPayloadIsData(payload) {
  */
 export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX_RESPONSE_BYTES, {
   endpoints = OVERPASS_UPSTREAMS,
-  fetchImpl = fetch,
+  fetchImpl,
   readBody = readResponseTextCapped,
   simplify = simplifyOverpassPayloadBody,
 } = {}) {
@@ -1183,7 +1184,7 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
     const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
 
     try {
-      const upstream = await fetchImpl(endpoint, {
+      const upstream = await guardedFetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -1191,6 +1192,14 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
         },
         body,
         signal: controller.signal,
+        timeoutMs: OVERPASS_TIMEOUT_MS,
+        fetchImpl,
+        // `fetchImpl` is an offline test seam: its synthetic mirror names do
+        // not exist in DNS, so retain the old seam while production resolves
+        // each configured mirror through the outbound guard.
+        ...(fetchImpl ? {
+          lookupImpl: async () => [{ address: '93.184.216.34', family: 4 }],
+        } : {}),
       });
 
       const responseBody = await readBody(upstream, maxResponseBytes);

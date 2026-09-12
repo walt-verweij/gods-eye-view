@@ -33,6 +33,7 @@ export async function fetchCctvResponse(value, {
     timeoutMs,
     allowPrivateAddress,
     maxRedirects,
+    transport: 'pinned',
   });
 }
 

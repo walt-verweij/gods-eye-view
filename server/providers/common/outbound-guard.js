@@ -151,13 +151,18 @@ async function capInjectedResponse(response, maxBytes) {
 }
 
 /**
- * Resolve every destination once, pin that answer into the connection, and
- * re-run the policy for every manual redirect. `fetchImpl` is a test seam.
+ * Every caller gets DNS validation and manual redirect re-validation. The
+ * default `fetch` transport calls the current `globalThis.fetch` so provider
+ * test seams remain intact; it cannot pin Node's socket after validation.
+ * `transport: 'pinned'` is reserved for CCTV frame/media and Radio Browser,
+ * which already used raw Node requests and must retain DNS answer pinning.
+ * An injected `fetchImpl` always wins over either transport for testability.
  */
 export async function guardedFetch(value, options = {}) {
   const {
     lookupImpl = lookupDns,
     fetchImpl,
+    transport = 'fetch',
     timeoutMs = 8_000,
     maxRedirects = OUTBOUND_MAX_REDIRECTS,
     maxBytes,
@@ -166,6 +171,7 @@ export async function guardedFetch(value, options = {}) {
     ...fetchOptions
   } = options;
   let url = validUrl(value);
+  let requestValue = value;
   if (!url) throw new Error('Outbound upstream URL is invalid');
   const controller = new AbortController();
   const timeoutError = new Error('Outbound upstream fetch timed out');
@@ -179,10 +185,18 @@ export async function guardedFetch(value, options = {}) {
     for (let redirects = 0; ; redirects += 1) {
       const addresses = await resolveOutboundAddresses(url.hostname, lookupImpl, { allowPrivateAddress });
       if (controller.signal.aborted) throw controller.signal.reason;
-      const response = fetchImpl
-        ? await fetchImpl(url.href, { ...fetchOptions, signal: controller.signal, redirect: 'manual', resolvedAddresses: addresses })
-        : await fetchPinnedResponse(url.href, { ...fetchOptions, signal: controller.signal }, addresses, maxBytes);
-      const capped = fetchImpl ? await capInjectedResponse(response, maxBytes) : response;
+      const requestOptions = {
+        ...fetchOptions,
+        signal: controller.signal,
+        redirect: 'manual',
+        resolvedAddresses: addresses,
+      };
+      const response = transport === 'pinned' && !fetchImpl
+        ? await fetchPinnedResponse(url.href, requestOptions, addresses, maxBytes)
+        : await (fetchImpl || globalThis.fetch)(requestValue, requestOptions);
+      const capped = transport === 'pinned' && !fetchImpl
+        ? response
+        : await capInjectedResponse(response, maxBytes);
       if (!REDIRECT_STATUS.has(capped.status)) return capped;
       if (redirects >= maxRedirects) {
         try { await capped.body?.cancel(); } catch { /* no-op */ }
@@ -192,6 +206,7 @@ export async function guardedFetch(value, options = {}) {
       try { await capped.body?.cancel(); } catch { /* no-op */ }
       url = location ? validUrl(new URL(location, url).href) : null;
       if (!url) throw new Error('Outbound upstream redirect is invalid');
+      requestValue = url;
     }
   } catch (error) {
     if (controller.signal.reason === timeoutError) throw timeoutError;

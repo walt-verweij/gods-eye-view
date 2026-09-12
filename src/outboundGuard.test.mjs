@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import test from 'node:test';
 import { guardedFetch } from '../server/providers/common/outbound-guard.js';
 
@@ -96,4 +97,41 @@ test('guardedFetch returns legitimate responses and pins their DNS answer', asyn
   });
   assert.equal(await response.text(), 'legitimate');
   assert.deepEqual(seenAddresses, [{ address: '93.184.216.34', family: 4 }]);
+});
+
+test('guardedFetch default transport uses the current global fetch implementation', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+    assert.equal(options.redirect, 'manual');
+    assert.deepEqual(options.resolvedAddresses, [{ address: '93.184.216.34', family: 4 }]);
+    return new Response('global transport');
+  };
+  try {
+    const response = await guardedFetch('https://public.example/data', { lookupImpl: publicLookup });
+    assert.equal(await response.text(), 'global transport');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('guardedFetch pinned transport connects through the validated DNS answer', async () => {
+  const server = http.createServer((_request, response) => response.end('pinned transport'));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('pinned transport must not call global fetch'); };
+  try {
+    const response = await guardedFetch(`http://outbound.test:${port}/data`, {
+      transport: 'pinned',
+      allowPrivateAddress: true,
+      lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+    });
+    assert.equal(await response.text(), 'pinned transport');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
