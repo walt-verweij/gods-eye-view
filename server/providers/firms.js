@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { registerProxy } from './common/proxy.js';
 
 import { filterTrailing24h, parseFirmsCsv } from '../../src/data/firmsCsv.js';
 
@@ -167,7 +168,7 @@ export function firmsProxy() {
     return statusInflight;
   }
 
-  return {
+  return registerProxy({
     name: 'firms-proxy',
     configureServer(server) {
       server.middlewares.use('/api/firms', async (req, res) => {
@@ -255,5 +256,5 @@ export function firmsProxy() {
         }
       });
     },
-  };
+  });
 }

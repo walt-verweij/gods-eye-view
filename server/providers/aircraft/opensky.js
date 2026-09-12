@@ -4,6 +4,7 @@ import {
   readResponseJsonCapped,
 } from '../common/http.js';
 import { requiredFiniteQueryNumber } from '../common/query.js';
+import { registerProxy } from '../common/proxy.js';
 // ---------------------------------------------------------------------------
 // OpenSky OAuth2 token + response cache state
 // ---------------------------------------------------------------------------
@@ -348,7 +349,7 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  * @returns {import('vite').Plugin}
  */
 export function openSkyProxy() {
-  return {
+  return registerProxy({
     name: 'opensky-proxy',
     configureServer(server) {
       server.middlewares.use('/api/opensky', async (req, res) => {
@@ -695,5 +696,5 @@ export function openSkyProxy() {
         }
       });
     },
-  };
+  });
 }

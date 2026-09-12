@@ -7,6 +7,7 @@ import {
   projectNearbyPlaces,
   projectTextSearchPlaces,
 } from '../../../src/data/placeProviderPayloads.js';
+import { registerProxy } from '../common/proxy.js';
 
 // Construct lazily after the standalone environment has loaded.
 // undefined = not built yet; null = unlimited; fn = active limiter
@@ -250,13 +251,10 @@ export function googlePlacesContextProxy({
     });
   }
 
-  return {
+  return registerProxy({
     name: 'google-places-context-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }

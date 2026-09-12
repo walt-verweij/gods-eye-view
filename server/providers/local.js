@@ -40,6 +40,7 @@ import { trackBackfillProxies } from './aircraft/tracks.js';
 import { aisLiveProxy } from './vessels/ais-live.js';
 import { readResponseTextCapped, readResponseJsonCapped, coalesceProxyRequest, readCappedResponseText } from './common/http.js';
 import { fetchCctvFrame, fetchCctvResponse } from './common/cctv-transport.js';
+import { registerProxy } from './common/proxy.js';
 import { requiredFiniteQueryNumber, clampInt } from './common/query.js';
 export { adsbLolFallbackAnchor, readResponseTextCapped, readResponseJsonCapped, coalesceProxyRequest, requiredFiniteQueryNumber };
 
@@ -1099,11 +1100,10 @@ function radioBrowserProxy() {
   const install = (server) => {
     server.middlewares.use('/api/radio', middleware);
   };
-  return {
+  return registerProxy({
     name: 'radio-browser-proxy',
     configureServer: install,
-    configurePreviewServer: install,
-  };
+  });
 }
 // Sourced from the shared voice-model registry so the client's cost estimate
 // can never be computed against a different model than the session runs on.
@@ -1290,7 +1290,7 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
  * @returns {import('vite').Plugin}
  */
 function overpassProxy() {
-  return {
+  return registerProxy({
     name: 'overpass-proxy',
     configureServer(server) {
       server.middlewares.use('/api/overpass', async (req, res) => {
@@ -1423,7 +1423,7 @@ function overpassProxy() {
 
       installRouteMiddleware(server.middlewares);
     },
-  };
+  });
 }
 
 /**
@@ -2555,7 +2555,7 @@ function cctvProxy() {
     }
   };
 
-  return {
+  return registerProxy({
     name: 'cctv-proxy',
     configureServer(server) {
       server.middlewares.use('/api/cctv', async (req, res) => {
@@ -2773,7 +2773,7 @@ function cctvProxy() {
         }
       });
     },
-  };
+  });
 }
 
 /**
@@ -3042,15 +3042,12 @@ export function openAiRealtimeProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'openai-realtime-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function extractOpenAiResponseText(data) {
@@ -4056,15 +4053,12 @@ function militaryInstallationsProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'military-installations-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4344,15 +4338,12 @@ function regionalBriefProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'regional-brief-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 function weatherEffectsProxy() {
@@ -4426,15 +4417,12 @@ function weatherEffectsProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'weather-effects-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }
 
 /**
@@ -4605,7 +4593,7 @@ function keySetupEndpoint() {
       throw error;
     }
   };
-  return {
+  return registerProxy({
     name: 'gev-key-setup',
     // serve AND not preview: `vite preview` resolves with command 'serve' too,
     // so a bare apply:'serve' would still configure under preview. The endpoints
@@ -4692,7 +4680,7 @@ function keySetupEndpoint() {
         });
       });
     },
-  };
+  }, { preview: false });
 }
 
 /** Construct the local provider plugins in their established order. */

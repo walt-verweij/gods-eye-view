@@ -1,5 +1,6 @@
 import { getOpenSkyToken } from './opensky.js';
 import { readCappedResponseText } from '../common/http.js';
+import { registerProxy } from '../common/proxy.js';
 /**
  * Vite plugin: aircraft track-history backfill proxies (PRD WS-F F1/F2).
  *
@@ -116,13 +117,10 @@ export function trackBackfillProxies() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'track-backfill-proxies',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }

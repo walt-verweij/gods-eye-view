@@ -3,6 +3,7 @@ import {
   isAllowedGbfsPath,
   gbfsCacheControl,
 } from '../../src/data/gbfsSource.js';
+import { registerProxy } from './common/proxy.js';
 
 // ---------------------------------------------------------------------------
 // GBFS (General Bikeshare Feed Specification) proxy constants
@@ -21,7 +22,7 @@ const GBFS_PROXY_TIMEOUT_MS = 12000;
  * @returns {import('vite').Plugin}
  */
 export function gbfsProxy() {
-  return {
+  return registerProxy({
     name: 'gbfs-proxy',
     configureServer(server) {
       server.middlewares.use('/api/gbfs', async (req, res) => {
@@ -177,5 +178,5 @@ export function gbfsProxy() {
         }
       });
     },
-  };
+  });
 }

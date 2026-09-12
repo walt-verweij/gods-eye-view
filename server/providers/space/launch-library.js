@@ -4,6 +4,7 @@ import {
   readResponseTextCapped,
   coalesceProxyRequest,
 } from '../common/http.js';
+import { registerProxy } from '../common/proxy.js';
 import { launchLibraryRecentUrl } from '../../../src/data/spaceProviderRequests.js';
 
 export const LL2_CACHE_TTL_MS = 15 * 60_000;
@@ -132,13 +133,10 @@ export function rocketLaunchesProxy() {
     });
   }
 
-  return {
+  return registerProxy({
     name: 'rocket-launches-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
-    configurePreviewServer(server) {
-      install(server.middlewares);
-    },
-  };
+  });
 }

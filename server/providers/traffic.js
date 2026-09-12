@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { registerProxy } from './common/proxy.js';
 
 import {
   isValidTileCoord as isValidTomTomTile,
@@ -144,7 +145,7 @@ export function tomtomProxy() {
     return buf;
   }
 
-  return {
+  return registerProxy({
     name: 'tomtom-proxy',
     configureServer(server) {
       server.middlewares.use('/api/tomtom', async (req, res) => {
@@ -260,5 +261,5 @@ export function tomtomProxy() {
         }
       });
     },
-  };
+  });
 }
