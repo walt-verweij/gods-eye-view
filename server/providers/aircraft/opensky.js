@@ -5,6 +5,7 @@ import {
 } from '../common/http.js';
 import { requiredFiniteQueryNumber } from '../common/query.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 // ---------------------------------------------------------------------------
 // OpenSky OAuth2 token + response cache state
 // ---------------------------------------------------------------------------
@@ -65,6 +66,17 @@ let _openskyAuthModeWarned = false;
 const OPENSKY_AUTH_MODE_DEFAULT = 'oauth';
 /** Set of valid OPENSKY_AUTH_MODE values. */
 const OPENSKY_AUTH_MODE_SET = new Set(['basic', 'oauth', 'auto', 'anon']);
+const OPENSKY_OAUTH_ERROR_CODES = new Set([
+  'access_denied',
+  'invalid_client',
+  'invalid_grant',
+  'invalid_request',
+  'invalid_scope',
+  'server_error',
+  'temporarily_unavailable',
+  'unauthorized_client',
+  'unsupported_grant_type',
+]);
 /** Regional civilian fallback cache, keyed by a coarse 0.25° view anchor. */
 const _adsbLolPointCache = new Map();
 /** Per-anchor single-flight map for concurrent regional fallback requests. */
@@ -103,7 +115,7 @@ export async function getOpenSkyToken() {
   // Wrap the async token fetch in a shared promise stored in _openskyTokenPromise
   _openskyTokenPromise = (async () => {
     try {
-      const res = await fetch(
+      const res = await guardedFetch(
         'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
         {
           method: 'POST',
@@ -123,9 +135,12 @@ export async function getOpenSkyToken() {
       const expiresIn = Number(data?.expires_in);
       if (!res.ok || !accessToken) {
         if (!_openskyAuthWarned) {
-          const detail =
-            data?.error_description || data?.error || `HTTP ${res.status}`;
-          console.warn('[OpenSky] OAuth client_credentials failed:', detail);
+          const errorCode = OPENSKY_OAUTH_ERROR_CODES.has(data?.error)
+            ? data.error
+            : 'unknown';
+          console.warn(
+            `[OpenSky] OAuth client_credentials failed: HTTP ${res.status} (${errorCode})`,
+          );
           _openskyAuthWarned = true;
         }
         _openskyToken = null;
@@ -144,11 +159,10 @@ export async function getOpenSkyToken() {
       );
       _openskyAuthWarned = false;
       return _openskyToken;
-    } catch (err) {
+    } catch {
       if (!_openskyAuthWarned) {
         console.warn(
-          '[OpenSky] OAuth token request failed:',
-          err?.message || String(err),
+          '[OpenSky] OAuth token request failed: OPENSKY_TOKEN_REQUEST_FAILED',
         );
         _openskyAuthWarned = true;
       }
@@ -177,9 +191,7 @@ function normalizeOpenSkyAuthMode(value) {
   if (!raw) return OPENSKY_AUTH_MODE_DEFAULT;
   if (OPENSKY_AUTH_MODE_SET.has(raw)) return raw;
   if (!_openskyAuthModeWarned) {
-    console.warn(
-      `[OpenSky] Invalid OPENSKY_AUTH_MODE="${raw}", defaulting to "${OPENSKY_AUTH_MODE_DEFAULT}"`,
-    );
+    console.warn('[OpenSky] Invalid OPENSKY_AUTH_MODE; using default.');
     _openskyAuthModeWarned = true;
   }
   return OPENSKY_AUTH_MODE_DEFAULT;
@@ -256,7 +268,7 @@ async function fetchAdsbLolPointFallback(req) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       try {
-        const upstream = await fetch(
+        const upstream = await guardedFetch(
           `https://api.adsb.lol/v2/lat/${roundedLat}/lon/${roundedLon}/dist/${ADSBLOL_POINT_RADIUS_NM}`,
           {
             headers: {
@@ -264,6 +276,7 @@ async function fetchAdsbLolPointFallback(req) {
               'User-Agent': 'gods-eye-view-adsblol-regional-fallback/1.0',
             },
             signal: controller.signal,
+            timeoutMs: 10000,
           },
         );
         if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
@@ -473,7 +486,7 @@ export function openSkyProxy() {
             }
           }
 
-          let upstream = await fetch(
+          let upstream = await guardedFetch(
             'https://opensky-network.org/api/states/all?extended=1',
             { headers },
           );
@@ -488,7 +501,7 @@ export function openSkyProxy() {
               Accept: 'application/json',
               Authorization: `Basic ${Buffer.from(`${basicUser}:${basicPass}`).toString('base64')}`,
             };
-            upstream = await fetch(
+            upstream = await guardedFetch(
               'https://opensky-network.org/api/states/all?extended=1',
               { headers: retryHeaders },
             );

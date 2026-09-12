@@ -3,39 +3,25 @@
 Ordered follow-ups from the 2026-09-11 adoption plan (`PLANS.md`). Each item names why it
 exists and what "done" looks like. None of these block the plan's milestones.
 
-## 1. Server-side redaction for the Realtime debug log
+## 1. Server-side redaction for the Realtime debug log (done 2026-09-12)
 
-`POST /api/realtime/debug-log` (`server/providers/local.js`) appends any JSON body,
-up to 8 MB, to `.gev-logs/realtime-conversations.jsonl`. The browser redacts before posting;
-the server does not. On a LAN-exposed instance any client can write arbitrary content into
-that local file. Done: allowlist the record fields server-side and drop everything else, with a
-test posting a body carrying `Authorization`, `apiKey` and a bearer token that proves none of
-them reach disk. Found by the milestone 11 log-redaction review.
+`/api/realtime/debug-log` now keeps only the browser writer's record fields and scrubs API keys, bearer
+tokens, client secrets and image data URLs before writing; `src/realtimeDebugLog.test.mjs` posts a body
+carrying all four and proves none reach disk.
 
-## 2. Error-path logging that can echo upstream URLs or config values
+## 2. Error-path logging that can echo upstream URLs or config values (done 2026-09-12)
 
-Same review. Conditional leaks only, all on error paths:
+Every listed site now logs a fixed code or the variable name and presence only; GBFS rejects userinfo in
+upstream URLs; `src/serverLogRedaction.test.mjs` pins each site. Launchers print presence, not paths.
 
-- `server/providers/gbfs.js` logs `error.message`; URL validation still admits userinfo on an
-  allowed host, and a rejected URL is echoed whole. Done: reject userinfo, log a fixed code.
-- `server/providers/aircraft/opensky.js` logs the raw OAuth `error_description`. Done: log status plus an
-  allowlisted error code.
-- `server/providers/local.js` (three CCTV sites) and `server/providers/firms.js` log raw parse or
-  transport messages that can carry source snippets or echoed keys. Done: fixed codes only.
-- `server/providers/aircraft/opensky.js`, `server/providers/vessels/ais-live.js` (via `src/data/aisWatchdog.js`),
-  `scripts/dev-secure.sh` and `scripts/dev-fresh.sh` print an invalid configuration value in
-  warnings; the launchers also print the absolute credentials-file path. Done: name the
-  variable, not its value; print presence, not the path.
+## 3. Route every proxy's outbound fetch through the outbound guard (done 2026-09-12)
 
-## 3. Route every proxy's outbound fetch through the outbound guard
-
-Milestone 3 built `server/providers/common/cctv-transport.js`, but only CCTV frame and media
-fetches and the radio proxy use its destination policy. Every
-other provider module carries an `Outbound guard gap` header naming its unguarded fetches
-(fixed public upstreams for most; OpenAI, Google Places, AISStream WebSocket, Nominatim, news
-and weather for the rest). Done: one shared guarded-fetch helper, adopted provider by provider
-with each module's header removed in the same commit; radio drops its private copy of DNS
-pinning last.
+`server/providers/common/outbound-guard.js` (`guardedFetch`): DNS resolved once and validated against the
+shared address classifier, manual redirect re-validation (max 3), provider timeouts and optional byte caps.
+Every HTTP provider uses it; injected `fetchImpl` and the current `globalThis.fetch` remain the transport so
+existing test seams hold, and only CCTV media and Radio Browser use the pinned raw transport they had before.
+The AISStream WebSocket is out of scope and says so in its header. `src/outboundGuard.test.mjs` covers both
+transports.
 
 ## 4. Deeper StyleManager carve
 
@@ -43,15 +29,23 @@ Milestone 10 extracted three controllers (panel layout, keyboard focus, map-stac
 milestone 8 the cockpit view, but `src/ui.js` is still an 8,700-line class. Remaining seams
 worth taking in the same characterisation-test-first pattern: awareness subject selection
 (`gev:awareness-subject-selected`), context mode and Contacts, share-link restore, and the
-detection and HUD wiring. Done when no single controller in `src/ui.js` exceeds roughly 2,000
-lines and each extracted piece constructs under the DOM stub used by
+detection and HUD wiring. Awareness selection is now extracted; the Display controller owns
+detection/HUD toggle and readout wiring, while Context/Contacts and share restore remain.
+Context/Contacts cannot move as one seam because `_contextModeChanging`, `_contextSessionSnapshot`,
+`_contextRestoreState`, `_contextModeEntryIntent`, and `_contextModeReplacementIntent` form one
+transaction shared by visibility guards, restore replay, cockpit exits, panel state, and voice.
+Share restore cannot move as one seam because the `ShareLinkManager.applyState` constructor
+callback mutates visual controls, panels, navigation, and layer-state restoration, while visual
+restore-lane claims are distributed across those independent owner paths. Done when the extracted
+awareness and Display controllers retain their characterisation coverage, and the remaining
+Context/Contacts and share-restoration transactions have first been split into real ownership
+boundaries; each extracted piece must construct under the DOM stub used by
 `src/cockpitViewController.test.mjs`.
 
-## 5. Node 20 hang in the unit runner
+## 5. Node 20 hang in the unit runner (done 2026-09-12)
 
-`node --test` on Node 20 spins forever inside `src/annotations/annotationEngine.test.mjs`.
-Node 20 is outside `engines`, so this is a footgun rather than a bug. Done: `npm run doctor`
-warns on Node < 24 and the runner refuses to start there.
+`scripts/run-unit-tests.mjs` now refuses any engine below 24.14 with an explicit message
+instead of hanging; `npm run doctor` already reported it as an error.
 
 ## Status block (2026-09-11, end of the adoption-plan session)
 

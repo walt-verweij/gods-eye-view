@@ -1,6 +1,7 @@
 import { makeRateLimiter, clientKey } from '../common/rate-limit.js';
 import { haversineKm } from '../common/geo.js';
 import { readResponseTextCapped } from '../common/http.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 import {
   normalizeRouteProfile,
   projectRouteResult,
@@ -101,8 +102,9 @@ export function installRouteMiddleware(middlewares) {
       const timer = setTimeout(() => controller.abort(), 12000);
       let osrm;
       try {
-        const upstreamRes = await fetch(upstream, {
+        const upstreamRes = await guardedFetch(upstream, {
           signal: controller.signal,
+          timeoutMs: 12000,
           headers: { 'User-Agent': 'gods-eye-view/dev (local)' },
         });
         if (!upstreamRes.ok) return fail('no route found');

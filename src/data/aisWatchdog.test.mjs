@@ -850,11 +850,13 @@ test('an empty or unparseable silence override never silently disables the watch
   assert.deepEqual(parseSilenceTimeoutEnv(null, warn), { kind: 'default' });
   assert.equal(warnings.length, 0, 'an absent value is normal, not worth warning about');
 
-  assert.deepEqual(parseSilenceTimeoutEnv('abc', warn), { kind: 'default' });
+  const secret = 'fixture-secret-value';
+  assert.deepEqual(parseSilenceTimeoutEnv(secret, warn), { kind: 'default' });
   assert.deepEqual(parseSilenceTimeoutEnv('-5', warn), { kind: 'default' });
   assert.deepEqual(parseSilenceTimeoutEnv('12s', warn), { kind: 'default' });
   assert.equal(warnings.length, 3, 'each bad value says so exactly once');
-  assert.match(warnings[0], /Ignoring AISSTREAM_SILENCE_TIMEOUT_MS="abc"/);
+  assert.match(warnings[0], /Invalid AISSTREAM_SILENCE_TIMEOUT_MS; using the default/);
+  assert.doesNotMatch(warnings[0], /fixture-secret-value/);
 });
 
 test('only a literal zero is the documented kill switch', () => {

@@ -131,7 +131,7 @@ resolve_opensky_credentials() {
   case "${OPENSKY_AUTH_MODE}" in
     basic|oauth|auto|anon) ;;
     *)
-      echo "warning: invalid OPENSKY_AUTH_MODE='${OPENSKY_AUTH_MODE}', defaulting to 'oauth'"
+      echo "warning: invalid OPENSKY_AUTH_MODE; defaulting to oauth"
       OPENSKY_AUTH_MODE="oauth"
       ;;
   esac
@@ -287,12 +287,12 @@ echo "Google Maps key source: ${GOOGLE_MAPS_API_KEY_SOURCE}"
 echo "Tip: after server starts, hard refresh browser (Cmd+Shift+R)."
 echo "If panels are still missing, run this once in browser console:"
 echo "localStorage.removeItem('godsEyeView.v6.panelPos.cctv-panel'); location.reload();"
-echo "OpenSky auth mode: ${OPENSKY_AUTH_MODE}"
+echo "OPENSKY_AUTH_MODE: set"
 if [[ -n "${OPENSKY_CREDENTIALS_FILE}" ]]; then
   if [[ -f "${OPENSKY_CREDENTIALS_FILE}" ]]; then
-    echo "OpenSky credentials file: ${OPENSKY_CREDENTIALS_FILE}"
+    echo "OPENSKY_CREDENTIALS_FILE: set (exists)"
   else
-    echo "OpenSky credentials file: ${OPENSKY_CREDENTIALS_FILE} (missing)"
+    echo "OPENSKY_CREDENTIALS_FILE: set (missing)"
   fi
 fi
 case "${OPENSKY_AUTH_MODE}" in

@@ -44,7 +44,8 @@
       "src/data/adsbLolFallback.js",
       "src/data/aisStreamAdapter.js",
       "src/data/aisWatchdog.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": ["ws"]
   },
@@ -66,7 +67,8 @@
       "server/providers/common/http.js",
       "scripts/google-server-key.mjs",
       "src/data/placeProviderPayloads.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },
@@ -84,7 +86,8 @@
       "server/providers/space/launch-library.js",
       "server/providers/common/http.js",
       "src/data/spaceProviderRequests.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },
@@ -99,7 +102,8 @@
     "modules": [
       "server/providers/terrain.js",
       "src/data/terrainHeightsProxy.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },
@@ -114,7 +118,8 @@
     "modules": [
       "server/providers/traffic.js",
       "src/data/tomtomTiles.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },
@@ -129,7 +134,8 @@
     "modules": [
       "server/providers/firms.js",
       "src/data/firmsCsv.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },
@@ -139,7 +145,8 @@
     "modules": [
       "server/providers/gbfs.js",
       "src/data/gbfsSource.js",
-      "server/providers/common/proxy.js"
+      "server/providers/common/proxy.js",
+      "server/providers/common/outbound-guard.js"
     ],
     "external": []
   },

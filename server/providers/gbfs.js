@@ -4,6 +4,7 @@ import {
   gbfsCacheControl,
 } from '../../src/data/gbfsSource.js';
 import { registerProxy } from './common/proxy.js';
+import { guardedFetch } from './common/outbound-guard.js';
 
 // ---------------------------------------------------------------------------
 // GBFS (General Bikeshare Feed Specification) proxy constants
@@ -82,6 +83,19 @@ export function gbfsProxy() {
             return;
           }
 
+          if (upstreamUrl.username || upstreamUrl.password) {
+            res.writeHead(400, {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store',
+            });
+            res.end(
+              JSON.stringify({
+                error: 'GBFS targets must not include userinfo',
+              }),
+            );
+            return;
+          }
+
           if (!isAllowedGbfsHost(upstreamUrl.hostname)) {
             res.writeHead(403, {
               'Content-Type': 'application/json',
@@ -112,13 +126,14 @@ export function gbfsProxy() {
           );
           let upstream;
           try {
-            upstream = await fetch(upstreamUrl.toString(), {
+            upstream = await guardedFetch(upstreamUrl.toString(), {
               method: 'GET',
               headers: {
                 Accept: 'application/json',
                 'User-Agent': 'gods-eye-view-gbfs-proxy/1.0',
               },
               signal: controller.signal,
+              timeoutMs: GBFS_PROXY_TIMEOUT_MS,
             });
           } finally {
             clearTimeout(timeoutId);
@@ -169,7 +184,7 @@ export function gbfsProxy() {
             res.end(JSON.stringify({ error: 'GBFS upstream timeout' }));
             return;
           }
-          console.error('[GBFS Proxy]', error?.message || String(error));
+          console.error('[GBFS Proxy] GBFS_UPSTREAM_REQUEST_FAILED');
           res.writeHead(502, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-store',

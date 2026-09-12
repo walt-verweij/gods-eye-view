@@ -8,6 +8,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ui = [
   fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8'),
   fs.readFileSync(path.join(ROOT, 'src', 'cockpitViewController.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'src', 'ui', 'awarenessSelectionController.js'), 'utf8'),
 ].join('\n');
 const firms = fs.readFileSync(path.join(ROOT, 'src', 'data', 'firmsHeatmap.js'), 'utf8');
 const vessels = fs.readFileSync(path.join(ROOT, 'src', 'data', 'aisLiveVessels.js'), 'utf8');
@@ -53,7 +54,7 @@ test('Cockpit takeover invalidates deferred work before camera cancellation', ()
 test('one explicit tracking selection clears sibling IDs before publishing its durable replacement', () => {
   const persist = body(
     ui,
-    /_persistAwarenessSelection\(event, cleared = false\) \{([\s\S]*?)\n  \}/,
+    /persistSelection\(event, cleared = false\) \{([\s\S]*?)\n  \}/,
     'tracking persistence',
   );
   assert.match(persist, /adoptLayerParams\?\.\(layerId,/);
