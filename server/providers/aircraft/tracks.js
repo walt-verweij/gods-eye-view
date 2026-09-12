@@ -1,6 +1,7 @@
 import { getOpenSkyToken } from './opensky.js';
 import { readCappedResponseText } from '../common/http.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 /**
  * Vite plugin: aircraft track-history backfill proxies (PRD WS-F F1/F2).
  *
@@ -37,9 +38,10 @@ export function trackBackfillProxies() {
       res.end(cached.body);
       return;
     }
-    const upstream = await fetch(upstreamUrl, {
+    const upstream = await guardedFetch(upstreamUrl, {
       headers,
       signal: AbortSignal.timeout(12000),
+      timeoutMs: 12000,
     });
     const { tooLarge, text } = await readCappedResponseText(
       upstream,

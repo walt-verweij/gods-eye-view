@@ -40,6 +40,7 @@ import { trackBackfillProxies } from './aircraft/tracks.js';
 import { aisLiveProxy } from './vessels/ais-live.js';
 import { readResponseTextCapped, readResponseJsonCapped, coalesceProxyRequest, readCappedResponseText } from './common/http.js';
 import { fetchCctvFrame, fetchCctvResponse } from './common/cctv-transport.js';
+import { guardedFetch, isPublicOutboundAddress } from './common/outbound-guard.js';
 import { registerProxy } from './common/proxy.js';
 import { requiredFiniteQueryNumber, clampInt } from './common/query.js';
 export { adsbLolFallbackAnchor, readResponseTextCapped, readResponseJsonCapped, coalesceProxyRequest, requiredFiniteQueryNumber };
@@ -51,7 +52,6 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import https from 'node:https';
 import { lookup as lookupDns } from 'node:dns/promises';
 import { directionToHeading } from '../../src/data/directionText.js';
 
@@ -725,40 +725,8 @@ function radioMirrorOrigin(value) {
   return `https://${hostname}`;
 }
 
-/** Return whether a resolved Radio Browser address is safe for an outbound request. */
-export function isPublicRadioAddress(value) {
-  const address = String(value ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (!address) return false;
-  if (!address.includes(':')) {
-    const ipv4 = address.split('.');
-    return ipv4.length === 4
-      && ipv4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
-      && !isNonGlobalIpv4(address);
-  }
-  const pieces = address.split('::');
-  if (pieces.length > 2) return false;
-  const left = pieces[0] ? pieces[0].split(':') : [];
-  const right = pieces[1] ? pieces[1].split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if ((pieces.length === 1 && missing !== 0) || (pieces.length === 2 && missing < 1)) return false;
-  const groups = [...left, ...Array(Math.max(0, missing)).fill('0'), ...right];
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return false;
-  const numeric = groups.reduce((total, group) => (total << 16n) | BigInt(`0x${group}`), 0n);
-  const inCidr = (base, prefix) => {
-    const shift = 128n - BigInt(prefix);
-    return (numeric >> shift) === (base >> shift);
-  };
-  const base = (text) => text.split(':').reduce(
-    (total, group) => (total << 16n) | BigInt(`0x${group || '0'}`),
-    0n,
-  );
-  const cidr = (text, prefix) => inCidr(base(text), prefix);
-  return cidr('2000:0:0:0:0:0:0:0', 3)
-    && !cidr('2001:0:0:0:0:0:0:0', 23)
-    && !cidr('2001:db8:0:0:0:0:0:0', 32)
-    && !cidr('2002:0:0:0:0:0:0:0', 16)
-    && !cidr('3fff:0:0:0:0:0:0:0', 20);
-}
+/** Compatibility alias; DNS policy and connection pinning live in guardedFetch. */
+export const isPublicRadioAddress = isPublicOutboundAddress;
 
 function radioProxyDestination(value) {
   let url;
@@ -782,46 +750,6 @@ function radioProxyDestination(value) {
   const directory = url.pathname === '/json/stations/search';
   const click = /^\/json\/url\/[0-9a-f-]+$/i.test(url.pathname) && !url.search;
   return discovery || directory || click ? url : null;
-}
-
-async function resolveRadioProxyAddresses(hostname, lookupImpl) {
-  const resolved = await lookupImpl(hostname, { all: true, verbatim: true });
-  const rows = Array.isArray(resolved) ? resolved : [resolved];
-  const addresses = rows
-    .map((row) => ({ address: String(row?.address || ''), family: Number(row?.family) || undefined }))
-    .filter((row) => row.address);
-  if (!addresses.length || addresses.some((row) => !isPublicRadioAddress(row.address))) {
-    throw new Error('Radio Browser resolved to a forbidden address');
-  }
-  return addresses;
-}
-
-function fetchPinnedRadioResponse(url, options, addresses) {
-  return new Promise((resolve, reject) => {
-    const address = addresses[0];
-    const request = https.request(url, {
-      method: 'GET',
-      headers: options.headers,
-      signal: options.signal,
-      lookup(_hostname, lookupOptions, callback) {
-        if (lookupOptions?.all) callback(null, addresses);
-        else callback(null, address.address, address.family);
-      },
-    }, (response) => {
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(response.headers)) {
-        if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
-        else if (value !== undefined) headers.set(name, String(value));
-      }
-      resolve(new Response(Readable.toWeb(response), {
-        status: response.statusCode || 500,
-        statusText: response.statusMessage || '',
-        headers,
-      }));
-    });
-    request.on('error', reject);
-    request.end();
-  });
 }
 
 async function mapRadioConcurrent(values, concurrency, mapper) {
@@ -858,15 +786,16 @@ export function createRadioProxyMiddleware({ fetchImpl = null, lookupImpl = look
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RADIO_FETCH_TIMEOUT_MS);
     try {
-      const addresses = await resolveRadioProxyAddresses(destination.hostname, lookupImpl);
       const options = {
         headers: { Accept: 'application/json', 'User-Agent': RADIO_USER_AGENT },
         signal: controller.signal,
-        redirect: 'manual',
+        lookupImpl,
+        fetchImpl: fetchImpl || undefined,
+        timeoutMs: RADIO_FETCH_TIMEOUT_MS,
+        maxRedirects: 0,
+        transport: 'pinned',
       };
-      const response = fetchImpl
-        ? await fetchImpl(destination.href, options)
-        : await fetchPinnedRadioResponse(destination, options, addresses);
+      const response = await guardedFetch(destination.href, options);
       if (response.status >= 300 && response.status < 400) {
         try { await response.body?.cancel?.(); } catch { /* no-op */ }
         throw new Error('Radio Browser redirects are refused');
@@ -1242,7 +1171,7 @@ export function overpassPayloadIsData(payload) {
  */
 export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX_RESPONSE_BYTES, {
   endpoints = OVERPASS_UPSTREAMS,
-  fetchImpl = fetch,
+  fetchImpl,
   readBody = readResponseTextCapped,
   simplify = simplifyOverpassPayloadBody,
 } = {}) {
@@ -1255,7 +1184,7 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
     const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
 
     try {
-      const upstream = await fetchImpl(endpoint, {
+      const upstream = await guardedFetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -1263,6 +1192,14 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
         },
         body,
         signal: controller.signal,
+        timeoutMs: OVERPASS_TIMEOUT_MS,
+        fetchImpl,
+        // `fetchImpl` is an offline test seam: its synthetic mirror names do
+        // not exist in DNS, so retain the old seam while production resolves
+        // each configured mirror through the outbound guard.
+        ...(fetchImpl ? {
+          lookupImpl: async () => [{ address: '93.184.216.34', family: 4 }],
+        } : {}),
       });
 
       const responseBody = await readBody(upstream, maxResponseBytes);
@@ -1918,7 +1855,7 @@ function prioritizeSources(cameras, maxCount, anchors) {
 async function loadAustinSourcesFromOpenData() {
   const endpoint = process.env.CCTV_AUSTIN_ROWS_URL || DEFAULT_AUSTIN_ROWS_URL;
   try {
-    const resp = await fetch(endpoint, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS) });
+    const resp = await guardedFetch(endpoint, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS), timeoutMs: CCTV_SOURCE_FETCH_TIMEOUT_MS });
     if (!resp.ok) {
       console.warn('[CCTV] Austin source download failed:', resp.status);
       return [];
@@ -2009,7 +1946,7 @@ async function loadCaltransSourcesFromOpenData() {
 
   const settled = await Promise.allSettled(
     districts.map(async (district) => {
-      const resp = await fetch(CALTRANS_CCTV_URL(district), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS) });
+      const resp = await guardedFetch(CALTRANS_CCTV_URL(district), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS), timeoutMs: CCTV_SOURCE_FETCH_TIMEOUT_MS });
       if (!resp.ok) throw new Error(`D${district} HTTP ${resp.status}`);
       const payload = await resp.json();
       const rows = Array.isArray(payload?.data) ? payload.data : [];
@@ -2104,7 +2041,7 @@ async function loadTflSourcesFromOpenData() {
   try {
     const appKey = String(process.env.TFL_APP_KEY || '').trim();
     const url = appKey ? `${TFL_JAMCAM_URL}?app_key=${encodeURIComponent(appKey)}` : TFL_JAMCAM_URL;
-    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS) });
+    const resp = await guardedFetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS), timeoutMs: CCTV_SOURCE_FETCH_TIMEOUT_MS });
     if (!resp.ok) {
       console.warn('[CCTV] TfL JamCam download failed:', resp.status);
       return [];
@@ -2579,9 +2516,10 @@ function cctvProxy() {
       sv.searchParams.set('return_error_code', 'true');
       sv.searchParams.set('key', streetViewKey);
 
-      const svResp = await fetch(sv.toString(), {
+      const svResp = await guardedFetch(sv.toString(), {
         headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
         signal: AbortSignal.timeout(CCTV_FRAME_FETCH_TIMEOUT_MS),
+        timeoutMs: CCTV_FRAME_FETCH_TIMEOUT_MS,
       });
       const svType = svResp.headers.get('content-type') || '';
       if (!svResp.ok || !svType.startsWith('image/')) return null;
@@ -2851,7 +2789,7 @@ export function openAiRealtimeProxy() {
       try {
         const body = await readRequestBody(req, 64 * 1024);
         const context = JSON.parse(body || '{}');
-        const response = await fetch('https://api.openai.com/v1/responses', {
+        const response = await guardedFetch('https://api.openai.com/v1/responses', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -3053,7 +2991,7 @@ export function openAiRealtimeProxy() {
       };
 
       try {
-        const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+        const response = await guardedFetch('https://api.openai.com/v1/realtime/client_secrets', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -4154,7 +4092,7 @@ async function fetchRegionalJson(url, {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal, headers });
+    const response = await guardedFetch(url, { signal: controller.signal, headers, timeoutMs });
     if (!response.ok) throw new Error(`Upstream returned ${response.status}`);
     return readResponseJsonCapped(response, maxBytes);
   } finally {
@@ -4170,7 +4108,7 @@ async function fetchRegionalText(url, {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal, headers });
+    const response = await guardedFetch(url, { signal: controller.signal, headers, timeoutMs });
     if (!response.ok) throw new Error(`Upstream returned ${response.status}`);
     return readResponseTextCapped(response, maxBytes);
   } finally {

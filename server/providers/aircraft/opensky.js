@@ -5,6 +5,7 @@ import {
 } from '../common/http.js';
 import { requiredFiniteQueryNumber } from '../common/query.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 // ---------------------------------------------------------------------------
 // OpenSky OAuth2 token + response cache state
 // ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ export async function getOpenSkyToken() {
   // Wrap the async token fetch in a shared promise stored in _openskyTokenPromise
   _openskyTokenPromise = (async () => {
     try {
-      const res = await fetch(
+      const res = await guardedFetch(
         'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
         {
           method: 'POST',
@@ -267,7 +268,7 @@ async function fetchAdsbLolPointFallback(req) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       try {
-        const upstream = await fetch(
+        const upstream = await guardedFetch(
           `https://api.adsb.lol/v2/lat/${roundedLat}/lon/${roundedLon}/dist/${ADSBLOL_POINT_RADIUS_NM}`,
           {
             headers: {
@@ -275,6 +276,7 @@ async function fetchAdsbLolPointFallback(req) {
               'User-Agent': 'gods-eye-view-adsblol-regional-fallback/1.0',
             },
             signal: controller.signal,
+            timeoutMs: 10000,
           },
         );
         if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
@@ -484,7 +486,7 @@ export function openSkyProxy() {
             }
           }
 
-          let upstream = await fetch(
+          let upstream = await guardedFetch(
             'https://opensky-network.org/api/states/all?extended=1',
             { headers },
           );
@@ -499,7 +501,7 @@ export function openSkyProxy() {
               Accept: 'application/json',
               Authorization: `Basic ${Buffer.from(`${basicUser}:${basicPass}`).toString('base64')}`,
             };
-            upstream = await fetch(
+            upstream = await guardedFetch(
               'https://opensky-network.org/api/states/all?extended=1',
               { headers: retryHeaders },
             );

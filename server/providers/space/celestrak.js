@@ -2,6 +2,7 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { celestrakTleUrl } from '../../../src/data/spaceProviderRequests.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 
 /**
  * Vite plugin: CelesTrak TLE proxy.
@@ -51,8 +52,9 @@ export function celestrakProxy() {
 
   async function fetchUpstream(group) {
     const url = celestrakTleUrl(group);
-    const res = await fetch(url.toString(), {
+    const res = await guardedFetch(url.toString(), {
       signal: AbortSignal.timeout(20000),
+      timeoutMs: 20000,
       // CelesTrak 403s bulk groups (e.g. `active`) unless the request carries a
       // descriptive User-Agent with a contact point.
       headers: {

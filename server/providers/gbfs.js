@@ -4,6 +4,7 @@ import {
   gbfsCacheControl,
 } from '../../src/data/gbfsSource.js';
 import { registerProxy } from './common/proxy.js';
+import { guardedFetch } from './common/outbound-guard.js';
 
 // ---------------------------------------------------------------------------
 // GBFS (General Bikeshare Feed Specification) proxy constants
@@ -125,13 +126,14 @@ export function gbfsProxy() {
           );
           let upstream;
           try {
-            upstream = await fetch(upstreamUrl.toString(), {
+            upstream = await guardedFetch(upstreamUrl.toString(), {
               method: 'GET',
               headers: {
                 Accept: 'application/json',
                 'User-Agent': 'gods-eye-view-gbfs-proxy/1.0',
               },
               signal: controller.signal,
+              timeoutMs: GBFS_PROXY_TIMEOUT_MS,
             });
           } finally {
             clearTimeout(timeoutId);

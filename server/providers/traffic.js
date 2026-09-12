@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { registerProxy } from './common/proxy.js';
+import { guardedFetch } from './common/outbound-guard.js';
 
 import {
   isValidTileCoord as isValidTomTomTile,
@@ -136,8 +137,9 @@ export function tomtomProxy() {
       'https://api.tomtom.com/traffic/map/4/tile/flow/relative/' +
       `${z}/${x}/${y}.pbf?key=${encodeURIComponent(process.env.TOMTOM_API_KEY)}`;
     recordUpstreamFetch(); // attempts count — upstream bills the request either way
-    const res = await fetch(url, {
+    const res = await guardedFetch(url, {
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());

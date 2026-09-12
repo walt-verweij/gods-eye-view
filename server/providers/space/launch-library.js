@@ -5,6 +5,7 @@ import {
   coalesceProxyRequest,
 } from '../common/http.js';
 import { registerProxy } from '../common/proxy.js';
+import { guardedFetch } from '../common/outbound-guard.js';
 import { launchLibraryRecentUrl } from '../../../src/data/spaceProviderRequests.js';
 
 export const LL2_CACHE_TTL_MS = 15 * 60_000;
@@ -70,8 +71,9 @@ export function rocketLaunchesProxy() {
   async function refreshUpstream() {
     const end = new Date();
     const url = launchLibraryRecentUrl(end);
-    const upstream = await fetch(url, {
+    const upstream = await guardedFetch(url, {
       signal: AbortSignal.timeout(20000),
+      timeoutMs: 20000,
       headers: launchLibraryRequestHeaders(),
     });
     const body = await readResponseTextCapped(upstream, maxResponseBytes);

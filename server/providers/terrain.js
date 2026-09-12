@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { registerProxy } from './common/proxy.js';
+import { guardedFetch } from './common/outbound-guard.js';
 
 import {
   fetchTerrainChunkWithRetry,
@@ -111,7 +112,9 @@ export function terrainHeightsProxy() {
     const results = [];
     for (let i = 0; i < points.length; i += UPSTREAM_CHUNK) {
       const chunk = points.slice(i, i + UPSTREAM_CHUNK);
-      const chunkResults = await fetchTerrainChunkWithRetry(chunk);
+      const chunkResults = await fetchTerrainChunkWithRetry(chunk, {
+        fetchImpl: guardedFetch,
+      });
       // Keep later chunks aligned even if a malformed upstream response omits
       // trailing positions. The resolver will reject each null individually.
       for (let j = 0; j < chunk.length; j += 1)

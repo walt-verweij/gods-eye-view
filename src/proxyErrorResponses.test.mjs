@@ -34,6 +34,7 @@ function fixture(name, overrides = {}, preview = false) {
     resolveTerrainHeightRequest: async () => { throw new Error(detail); },
     ...overrides,
   };
+  deps.guardedFetch = (...args) => deps.fetch(...args);
   const helpers = ['registerProxy', 'readResponseTextCapped', 'coalesceProxyRequest', 'launchLibraryRequestHeaders', 'celestrakTleUrl', 'launchLibraryRecentUrl'].map(extract).join('\n');
   const plugin = new Function(...Object.keys(deps), `${helpers}\n${extract(name)}\nreturn ${name}();`)(...Object.values(deps));
   let middleware;
